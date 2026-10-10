@@ -1,0 +1,5 @@
+employee_code,date,clock_in,clock_out,status,notes
+EMP-2026-001,2026-10-01,08:52:00,18:05:00,present,Regular morning clock-in
+EMP-2026-002,2026-10-01,09:25:00,18:15:00,late,Traffic delay on tollway
+EMP-2026-003,2026-10-01,08:45:00,18:00:00,present,On-time arrival
+EMP-2026-004,2026-10-01,09:00:00,13:00:00,half_day,Medical appointment afternoon

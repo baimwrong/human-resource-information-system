@@ -1,0 +1,33 @@
+<?php
+
+use Illuminate\Database\Migrations\Migration;
+use Illuminate\Database\Schema\Blueprint;
+use Illuminate\Support\Facades\Schema;
+
+return new class extends Migration
+{
+    /**
+     * Run the migrations for PostgreSQL 18.
+     */
+    public function up(): void
+    {
+        Schema::create('departments', function (Blueprint $table) {
+            $table->id();
+            $table->string('code', 20)->unique()->index();
+            $table->string('name')->unique();
+            $table->text('description')->nullable();
+            $table->foreignId('manager_id')->nullable()->constrained('users')->nullOnDelete();
+            $table->decimal('budget', 15, 2)->default(0.00);
+            $table->enum('status', ['active', 'inactive'])->default('active')->index();
+            $table->timestamps();
+        });
+    }
+
+    /**
+     * Reverse the migrations.
+     */
+    public function down(): void
+    {
+        Schema::dropIfExists('departments');
+    }
+};

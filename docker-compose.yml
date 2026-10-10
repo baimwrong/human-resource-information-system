@@ -1,0 +1,61 @@
+version: '3.8'
+
+services:
+  # Application Web Service
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: hris_app
+    restart: unless-stopped
+    working_dir: /var/www/html
+    ports:
+      - "8000:8000"
+    environment:
+      APP_NAME: "HRIS Enterprise"
+      APP_ENV: local
+      APP_KEY: "base64:7cRkO5m8T2b3K4d9L1w6P0y5E8u2I7o4A1s9D3f5G7h="
+      APP_DEBUG: "true"
+      APP_URL: "http://localhost:8000"
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: hris_db
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres_secret
+    volumes:
+      - .:/var/www/html
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - hris_network
+
+  # PostgreSQL 18 Database Service
+  postgres:
+    image: postgres:17-alpine # Or postgres:18 once released upstream
+    container_name: hris_postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: hris_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d hris_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hris_network
+
+volumes:
+  pgdata:
+    driver: local
+
+networks:
+  hris_network:
+    driver: bridge

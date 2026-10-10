@@ -1,0 +1,5 @@
+employee_code,first_name,last_name,email,department_code,designation_code,gender,date_of_birth,phone,join_date,employment_type,basic_salary
+EMP-2026-001,John,Doe,john.doe@example.com,ENG,SR-DEV,male,1992-05-15,+62812345678,2024-01-15,permanent,12500000
+EMP-2026-002,Jane,Smith,jane.smith@example.com,HRD,HR-EXEC,female,1995-08-20,+62812345679,2024-03-01,permanent,9500000
+EMP-2026-003,Michael,Tan,michael.tan@example.com,FIN,FIN-MGR,male,1989-11-10,+62812345680,2023-11-01,permanent,22000000
+EMP-2026-004,Amanda,Siregar,amanda.s@example.com,MKT,ENG-LEAD,female,1996-02-14,+62812345681,2024-06-01,contract,8000000
