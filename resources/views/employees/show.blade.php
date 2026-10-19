@@ -30,9 +30,11 @@
             </div>
 
             <div class="d-flex gap-2">
-                <a href="{{ route('employees.edit', $employee) }}" class="btn btn-outline-primary btn-sm">
-                    <i class="bi bi-pencil me-1"></i> Edit Profile
-                </a>
+                @if(Auth::user()->isHR())
+                    <a href="{{ route('employees.edit', $employee) }}" class="btn btn-outline-primary btn-sm">
+                        <i class="bi bi-pencil me-1"></i> Edit Profile
+                    </a>
+                @endif
                 <a href="{{ route('employees.index') }}" class="btn btn-outline-secondary btn-sm">
                     <i class="bi bi-arrow-left me-1"></i> Directory
                 </a>
@@ -48,11 +50,13 @@
             <i class="bi bi-person-lines-fill me-1"></i> Overview
         </button>
     </li>
+    @if($canViewFinancials)
     <li class="nav-item">
         <button class="nav-link" id="salary-tab" data-bs-toggle="tab" data-bs-target="#salary" type="button">
             <i class="bi bi-wallet2 me-1"></i> Salary Structure
         </button>
     </li>
+    @endif
     <li class="nav-item">
         <button class="nav-link" id="attendance-tab" data-bs-toggle="tab" data-bs-target="#attendance" type="button">
             <i class="bi bi-clock-history me-1"></i> Attendance Logs
@@ -63,11 +67,13 @@
             <i class="bi bi-calendar2-check me-1"></i> Leaves ({{ $employee->leaveBalances->sum('allocated_days') }}d)
         </button>
     </li>
+    @if($canViewFinancials)
     <li class="nav-item">
         <button class="nav-link" id="payslips-tab" data-bs-toggle="tab" data-bs-target="#payslips" type="button">
-            <i class="bi bi-receipt me-1"></i> Payslips ({{ $employee->payslips->count() }})
+            <i class="bi bi-receipt me-1"></i> Payslips ({{ $employee->payslips ? $employee->payslips->count() : 0 }})
         </button>
     </li>
+    @endif
 </ul>
 
 <!-- Tabs Content -->
@@ -106,9 +112,11 @@
                                 <tr><th class="ps-3 text-secondary">Probation End</th><td>{{ $employee->probation_end_date ? $employee->probation_end_date->format('d F Y') : '—' }}</td></tr>
                                 <tr><th class="ps-3 text-secondary">Reporting Manager</th><td>{{ $employee->manager ? $employee->manager->full_name : 'None (Top Level)' }}</td></tr>
                                 <tr><th class="ps-3 text-secondary">Assigned Shift</th><td>{{ $employee->shift ? $employee->shift->name : 'Regular' }}</td></tr>
+                                @if($canViewFinancials)
                                 <tr><th class="ps-3 text-secondary">Bank Details</th><td>{{ $employee->bank_name ?? 'N/A' }} &bull; {{ $employee->bank_account_number ?? 'N/A' }}</td></tr>
                                 <tr><th class="ps-3 text-secondary">Account Holder</th><td>{{ $employee->bank_holder_name ?? '—' }}</td></tr>
                                 <tr><th class="ps-3 text-secondary">Tax ID (NPWP)</th><td>{{ $employee->tax_id ?? '—' }}</td></tr>
+                                @endif
                             </tbody>
                         </table>
                     </div>
@@ -117,6 +125,7 @@
         </div>
     </div>
 
+    @if($canViewFinancials)
     <!-- 2. SALARY STRUCTURE TAB -->
     <div class="tab-pane fade" id="salary">
         @php $salary = $employee->salaryStructure; @endphp
@@ -178,6 +187,7 @@
             </div>
         @endif
     </div>
+    @endif
 
     <!-- 3. ATTENDANCE LOGS TAB -->
     <div class="tab-pane fade" id="attendance">
@@ -267,6 +277,7 @@
         </div>
     </div>
 
+    @if($canViewFinancials)
     <!-- 5. PAYSLIPS TAB -->
     <div class="tab-pane fade" id="payslips">
         <div class="card">
@@ -286,7 +297,7 @@
                         </tr>
                     </thead>
                     <tbody>
-                        @forelse($employee->payslips as $ps)
+                        @forelse($employee->payslips ?? [] as $ps)
                             <tr>
                                 <td class="ps-3 fw-semibold">{{ $ps->slip_number }}</td>
                                 <td>{{ $ps->period_name }}</td>
@@ -309,6 +320,7 @@
             </div>
         </div>
     </div>
+    @endif
 
 </div>
 @endsection

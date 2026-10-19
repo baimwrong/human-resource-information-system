@@ -69,6 +69,10 @@ class LeaveTypeController extends Controller
             return back()->withErrors(['error' => 'Cannot delete leave type that has associated leave requests.']);
         }
 
+        if ($leaveType->balances()->where('used_days', '>', 0)->orWhere('pending_days', '>', 0)->count() > 0) {
+            return back()->withErrors(['error' => 'Cannot delete leave type that has active or utilized employee leave balances.']);
+        }
+
         $name = $leaveType->name;
         $id = $leaveType->id;
         $leaveType->delete();

@@ -67,11 +67,12 @@
                     </button>
                 </form>
 
+                @if(app()->isLocal())
                 <hr class="my-4 text-muted">
 
                 <!-- Quick Demo Login Selection -->
                 <div class="text-center">
-                    <p class="small text-muted mb-2 fw-semibold">Quick Demo Login Presets:</p>
+                    <p class="small text-muted mb-2 fw-semibold">Quick Demo Login Presets (Local Only):</p>
                     <div class="d-flex flex-wrap gap-1 justify-content-center">
                         <button type="button" class="btn btn-sm btn-outline-primary" onclick="setCredentials('admin@enterprise-hris.local', 'Password123!')">
                             <i class="bi bi-shield-lock"></i> Admin
@@ -87,6 +88,7 @@
                         </button>
                     </div>
                 </div>
+                @endif
             </div>
         </div>
 

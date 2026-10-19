@@ -16,16 +16,24 @@ class SettingController extends Controller
 
     public function update(Request $request)
     {
-        $data = $request->except(['_token', '_method']);
+        $validated = $request->validate([
+            'company_name' => ['required', 'string', 'max:255'],
+            'company_email' => ['required', 'email', 'max:255'],
+            'company_phone' => ['nullable', 'string', 'max:50'],
+            'company_address' => ['nullable', 'string', 'max:500'],
+            'currency_symbol' => ['required', 'string', 'max:10'],
+            'timezone' => ['required', 'string', 'timezone'],
+            'work_days_per_month' => ['required', 'integer', 'between:1,31'],
+        ]);
 
-        foreach ($data as $key => $value) {
+        foreach ($validated as $key => $value) {
             Setting::set($key, $value);
         }
 
         AuditLogger::log(
             action: 'updated_system_settings',
             module: 'settings',
-            changes: $data
+            changes: $validated
         );
 
         return back()->with('success', 'System settings updated successfully.');

@@ -22,7 +22,7 @@ return new class extends Migration
             $table->decimal('total_allowance', 15, 2)->default(0.00);
             $table->decimal('total_deduction', 15, 2)->default(0.00);
             $table->decimal('net_salary', 15, 2);
-            $table->jsonb('breakdown');
+            $table->json('breakdown');
             $table->enum('payment_status', ['unpaid', 'paid'])->default('unpaid')->index();
             $table->timestamp('paid_at')->nullable();
             $table->string('payment_method')->default('bank_transfer');

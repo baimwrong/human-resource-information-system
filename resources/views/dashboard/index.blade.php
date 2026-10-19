@@ -270,10 +270,10 @@
             new Chart(trendCtx, {
                 type: 'line',
                 data: {
-                    labels: {!! json_encode($trendDates ?? []) !!},
+                    labels: @json($trendDates ?? []),
                     datasets: [{
                         label: 'Present Employees',
-                        data: {!! json_encode($trendPresent ?? []) !!},
+                        data: @json($trendPresent ?? []),
                         borderColor: '#3b82f6',
                         backgroundColor: 'rgba(59, 130, 246, 0.1)',
                         fill: true,
@@ -298,9 +298,9 @@
             new Chart(deptCtx, {
                 type: 'doughnut',
                 data: {
-                    labels: {!! json_encode($deptLabels ?? []) !!},
+                    labels: @json($deptLabels ?? []),
                     datasets: [{
-                        data: {!! json_encode($deptCounts ?? []) !!},
+                        data: @json($deptCounts ?? []),
                         backgroundColor: [
                             '#3b82f6', '#10b981', '#f59e0b', '#8b5cf6', '#ec4899', '#06b6d4'
                         ]

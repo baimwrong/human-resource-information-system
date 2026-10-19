@@ -68,8 +68,8 @@ class PayrollController extends Controller
     {
         $user = Auth::user();
 
-        // Enforce authorization: Admin/HR can view any payslip, Employee can only view their own
-        if (! $user->isHR() && $user->employee && $user->employee->id !== $payslip->employee_id) {
+        // Enforce authorization: Admin/HR can view any payslip, non-HR can only view their own
+        if (! $user->isHR() && (! $user->employee || $user->employee->id !== $payslip->employee_id)) {
             abort(403, 'Unauthorized access to payslip.');
         }
 

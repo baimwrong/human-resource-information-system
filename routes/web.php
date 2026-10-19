@@ -49,15 +49,16 @@ Route::middleware('auth')->group(function () {
     Route::get('/my-leaves', [LeaveController::class, 'myLeaves'])->name('leaves.my');
     Route::get('/leaves/apply', [LeaveController::class, 'create'])->name('leaves.create');
     Route::post('/leaves', [LeaveController::class, 'store'])->name('leaves.store');
+    Route::get('/leaves/{leaveRequest}/attachment', [LeaveController::class, 'downloadAttachment'])->name('leaves.attachment');
 
     // Payslip View (Accessible by self or Admin/HR)
     Route::get('/payslips/{payslip}', [PayrollController::class, 'payslip'])->name('payroll.payslip');
 
     // Management & HR Routes (admin, hr_manager, manager)
     Route::middleware('role:admin,hr_manager,manager')->group(function () {
-        // Employee Management
-        Route::get('/employees/export', [EmployeeController::class, 'exportCsv'])->name('employees.export');
-        Route::resource('employees', EmployeeController::class);
+        // Employee Directory (Read-only for managers)
+        Route::get('/employees', [EmployeeController::class, 'index'])->name('employees.index');
+        Route::get('/employees/{employee}', [EmployeeController::class, 'show'])->name('employees.show');
 
         // Daily Attendance Management
         Route::get('/attendance', [AttendanceController::class, 'index'])->name('attendance.index');
@@ -69,7 +70,7 @@ Route::middleware('auth')->group(function () {
         Route::post('/leaves/{leaveRequest}/reject', [LeaveController::class, 'reject'])->name('leaves.reject');
 
         // Performance Reviews
-        Route::resource('performance', PerformanceReviewController::class);
+        Route::resource('performance', PerformanceReviewController::class)->except(['edit', 'update']);
 
         // Company Announcements
         Route::get('/announcements', [AnnouncementController::class, 'index'])->name('announcements.index');
@@ -79,6 +80,10 @@ Route::middleware('auth')->group(function () {
 
     // HR & Administration (admin, hr_manager)
     Route::middleware('role:admin,hr_manager')->group(function () {
+        // Employee Administration (Creation, Editing, Deletion, Export)
+        Route::get('/employees/export', [EmployeeController::class, 'exportCsv'])->name('employees.export');
+        Route::resource('employees', EmployeeController::class)->except(['index', 'show']);
+
         // Departments & Job Designations
         Route::resource('departments', DepartmentController::class)->except(['create', 'show', 'edit']);
         Route::resource('designations', DesignationController::class)->except(['create', 'show', 'edit']);

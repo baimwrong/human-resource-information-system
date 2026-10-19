@@ -13,6 +13,7 @@ use Carbon\CarbonPeriod;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Storage;
 
 class LeaveController extends Controller
 {
@@ -85,6 +86,27 @@ class LeaveController extends Controller
             'attachment' => ['nullable', 'file', 'mimes:pdf,jpg,jpeg,png', 'max:5120'],
         ]);
 
+        $leaveType = LeaveType::findOrFail($validated['leave_type_id']);
+        if ($leaveType->requires_attachment && ! $request->hasFile('attachment')) {
+            return back()->withErrors(['attachment' => "An attachment (e.g., doctor certificate) is mandatory for {$leaveType->name}."])->withInput();
+        }
+
+        // Prevent overlapping leave applications
+        $overlapping = LeaveRequest::where('employee_id', $employee->id)
+            ->whereIn('status', ['pending', 'approved'])
+            ->where(function ($q) use ($validated) {
+                $q->whereBetween('start_date', [$validated['start_date'], $validated['end_date']])
+                  ->orWhereBetween('end_date', [$validated['start_date'], $validated['end_date']])
+                  ->orWhere(function ($sub) use ($validated) {
+                      $sub->where('start_date', '<=', $validated['start_date'])
+                          ->where('end_date', '>=', $validated['end_date']);
+                  });
+            })->exists();
+
+        if ($overlapping) {
+            return back()->withErrors(['start_date' => 'You already have an active leave application (pending or approved) overlapping this date range.'])->withInput();
+        }
+
         $start = Carbon::parse($validated['start_date']);
         $end = Carbon::parse($validated['end_date']);
 
@@ -98,7 +120,7 @@ class LeaveController extends Controller
         }
 
         if ($totalDays <= 0) {
-            return back()->withErrors(['start_date' => 'Selected date range contains only weekends.']);
+            return back()->withErrors(['start_date' => 'Selected date range contains only weekends.'])->withInput();
         }
 
         $currentYear = (int)$start->year;
@@ -110,12 +132,13 @@ class LeaveController extends Controller
             ->first();
 
         if ($balance && $balance->remaining_days < $totalDays) {
-            return back()->withErrors(['leave_type_id' => "Insufficient leave balance. You have {$balance->remaining_days} days remaining, but requested {$totalDays} days."]);
+            return back()->withErrors(['leave_type_id' => "Insufficient leave balance. You have {$balance->remaining_days} days remaining, but requested {$totalDays} days."])->withInput();
         }
 
+        // Store private attachment on local disk for medical confidentiality
         $attachmentPath = null;
         if ($request->hasFile('attachment')) {
-            $attachmentPath = $request->file('attachment')->store('leave_attachments', 'public');
+            $attachmentPath = $request->file('attachment')->store('leave_attachments', 'local');
         }
 
         DB::transaction(function () use ($employee, $validated, $totalDays, $attachmentPath, $balance) {
@@ -148,6 +171,18 @@ class LeaveController extends Controller
     {
         if ($leaveRequest->status !== 'pending') {
             return back()->with('error', 'Only pending leave requests can be approved.');
+        }
+
+        $user = Auth::user();
+
+        // Prevent self-approval
+        if ($user->employee && $user->employee->id === $leaveRequest->employee_id) {
+            return back()->with('error', 'You cannot approve your own leave request.');
+        }
+
+        // Only HR or the employee's direct manager can approve
+        if (! $user->isHR() && (! $user->employee || $user->employee->id !== $leaveRequest->employee->manager_id)) {
+            return back()->with('error', 'Unauthorized. Only HR or the direct reporting supervisor can review this leave request.');
         }
 
         DB::transaction(function () use ($leaveRequest, $request) {
@@ -204,6 +239,18 @@ class LeaveController extends Controller
             return back()->with('error', 'Only pending leave requests can be rejected.');
         }
 
+        $user = Auth::user();
+
+        // Prevent self-rejection / tampering
+        if ($user->employee && $user->employee->id === $leaveRequest->employee_id) {
+            return back()->with('error', 'You cannot act on your own leave request.');
+        }
+
+        // Only HR or direct supervisor can reject
+        if (! $user->isHR() && (! $user->employee || $user->employee->id !== $leaveRequest->employee->manager_id)) {
+            return back()->with('error', 'Unauthorized. Only HR or the direct reporting supervisor can review this leave request.');
+        }
+
         $request->validate(['action_reason' => 'required|string']);
 
         DB::transaction(function () use ($leaveRequest, $request) {
@@ -234,5 +281,30 @@ class LeaveController extends Controller
         );
 
         return back()->with('success', 'Leave request rejected.');
+    }
+
+    public function downloadAttachment(LeaveRequest $leaveRequest)
+    {
+        $user = Auth::user();
+        $isSelf = $user->employee && $user->employee->id === $leaveRequest->employee_id;
+        $isManagerOfEmp = $user->employee && $user->employee->id === $leaveRequest->employee->manager_id;
+
+        if (! $user->isHR() && ! $isSelf && ! $isManagerOfEmp) {
+            abort(403, 'Unauthorized access to confidential leave attachment.');
+        }
+
+        if (! $leaveRequest->attachment_path) {
+            abort(404, 'No attachment on file for this leave request.');
+        }
+
+        if (Storage::disk('local')->exists($leaveRequest->attachment_path)) {
+            return Storage::disk('local')->download($leaveRequest->attachment_path);
+        }
+
+        if (Storage::disk('public')->exists($leaveRequest->attachment_path)) {
+            return Storage::disk('public')->download($leaveRequest->attachment_path);
+        }
+
+        abort(404, 'Attachment file not found on storage disk.');
     }
 }

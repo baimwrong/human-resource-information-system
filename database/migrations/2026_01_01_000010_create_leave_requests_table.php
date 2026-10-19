@@ -25,6 +25,8 @@ return new class extends Migration
             $table->text('action_reason')->nullable();
             $table->timestamp('acted_at')->nullable();
             $table->timestamps();
+            $table->index(['status', 'start_date', 'end_date']);
+            $table->index(['employee_id', 'status']);
         });
     }
 

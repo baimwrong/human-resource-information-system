@@ -18,6 +18,14 @@
     </div>
 </div>
 
+@php
+    $currency = $payslip->breakdown['metadata']['currency_symbol'] ?? \App\Models\Setting::get('currency_symbol', 'IDR');
+    $companyName = $payslip->breakdown['metadata']['company_name'] ?? \App\Models\Setting::get('company_name', 'Acme Global Technologies Inc.');
+    $companyAddress = $payslip->breakdown['metadata']['company_address'] ?? \App\Models\Setting::get('company_address', 'Level 24, Cyber Tower One, Jl. HR Rasuna Said, Jakarta 12950');
+    $companyPhone = \App\Models\Setting::get('company_phone', '+62 21 555 0199');
+    $companyEmail = \App\Models\Setting::get('company_email', 'payroll@acmeglobal.com');
+@endphp
+
 <div class="row justify-content-center">
     <div class="col-lg-9">
         <div class="card border p-4 shadow-sm bg-white" style="border-radius: 0.5rem;">
@@ -30,13 +38,13 @@
                             <i class="bi bi-diagram-3-fill fs-4"></i>
                         </div>
                         <div>
-                            <h4 class="fw-bold mb-0 text-dark">ACME GLOBAL TECHNOLOGIES INC.</h4>
+                            <h4 class="fw-bold mb-0 text-dark">{{ strtoupper($companyName) }}</h4>
                             <div class="text-secondary small">People Operations &amp; Payroll Department</div>
                         </div>
                     </div>
                     <div class="text-muted fs-8 mt-1">
-                        Level 24, Cyber Tower One, Jl. HR Rasuna Said, Jakarta 12950<br>
-                        Phone: +62 21 555 0199 &bull; Email: payroll@acmeglobal.com
+                        {{ $companyAddress }}<br>
+                        Phone: {{ $companyPhone }} &bull; Email: {{ $companyEmail }}
                     </div>
                 </div>
 
@@ -100,25 +108,25 @@
                                         @if($earning['amount'] > 0)
                                             <tr>
                                                 <td class="ps-3 text-secondary">{{ $earning['label'] }}</td>
-                                                <td class="text-end pe-3 font-monospace">IDR {{ number_format($earning['amount'], 0, ',', '.') }}</td>
+                                                <td class="text-end pe-3 font-monospace">{{ $currency }} {{ number_format($earning['amount'], 0, ',', '.') }}</td>
                                             </tr>
                                         @endif
                                     @endforeach
                                 @else
                                     <tr>
                                         <td class="ps-3 text-secondary">Basic Salary</td>
-                                        <td class="text-end pe-3 font-monospace">IDR {{ number_format($payslip->basic_salary, 0, ',', '.') }}</td>
+                                        <td class="text-end pe-3 font-monospace">{{ $currency }} {{ number_format($payslip->basic_salary, 0, ',', '.') }}</td>
                                     </tr>
                                     <tr>
                                         <td class="ps-3 text-secondary">Allowances</td>
-                                        <td class="text-end pe-3 font-monospace">IDR {{ number_format($payslip->total_allowance, 0, ',', '.') }}</td>
+                                        <td class="text-end pe-3 font-monospace">{{ $currency }} {{ number_format($payslip->total_allowance, 0, ',', '.') }}</td>
                                     </tr>
                                 @endif
                             </tbody>
                             <tfoot class="table-light">
                                 <tr>
                                     <th class="ps-3">Total Gross Earnings (A)</th>
-                                    <th class="text-end pe-3 font-monospace text-success">IDR {{ number_format($payslip->gross_salary, 0, ',', '.') }}</th>
+                                    <th class="text-end pe-3 font-monospace text-success">{{ $currency }} {{ number_format($payslip->gross_salary, 0, ',', '.') }}</th>
                                 </tr>
                             </tfoot>
                         </table>
@@ -138,21 +146,21 @@
                                         @if($deduction['amount'] > 0)
                                             <tr>
                                                 <td class="ps-3 text-secondary">{{ $deduction['label'] }}</td>
-                                                <td class="text-end pe-3 font-monospace text-danger">-IDR {{ number_format($deduction['amount'], 0, ',', '.') }}</td>
+                                                <td class="text-end pe-3 font-monospace text-danger">-{{ $currency }} {{ number_format($deduction['amount'], 0, ',', '.') }}</td>
                                             </tr>
                                         @endif
                                     @endforeach
                                 @else
                                     <tr>
                                         <td class="ps-3 text-secondary">Total Deductions</td>
-                                        <td class="text-end pe-3 font-monospace text-danger">-IDR {{ number_format($payslip->total_deduction, 0, ',', '.') }}</td>
+                                        <td class="text-end pe-3 font-monospace text-danger">-{{ $currency }} {{ number_format($payslip->total_deduction, 0, ',', '.') }}</td>
                                     </tr>
                                 @endif
                             </tbody>
                             <tfoot class="table-light">
                                 <tr>
                                     <th class="ps-3">Total Deductions (B)</th>
-                                    <th class="text-end pe-3 font-monospace text-danger">-IDR {{ number_format($payslip->total_deduction, 0, ',', '.') }}</th>
+                                    <th class="text-end pe-3 font-monospace text-danger">-{{ $currency }} {{ number_format($payslip->total_deduction, 0, ',', '.') }}</th>
                                 </tr>
                             </tfoot>
                         </table>
@@ -164,7 +172,7 @@
             <div class="bg-primary bg-opacity-10 border border-primary rounded p-3 mb-4 d-flex justify-content-between align-items-center">
                 <div>
                     <span class="text-uppercase small fw-bold text-primary">TOTAL TAKE HOME PAY (NET SALARY = A &minus; B)</span>
-                    <h2 class="fw-bold text-dark mb-0 font-monospace">IDR {{ number_format($payslip->net_salary, 0, ',', '.') }}</h2>
+                    <h2 class="fw-bold text-dark mb-0 font-monospace">{{ $currency }} {{ number_format($payslip->net_salary, 0, ',', '.') }}</h2>
                 </div>
                 <div class="text-end">
                     <span class="badge bg-success py-2 px-3 fs-7">

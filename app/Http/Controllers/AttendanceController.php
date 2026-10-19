@@ -101,16 +101,20 @@ class AttendanceController extends Controller
             return back()->with('error', 'No employee profile linked to your user account.');
         }
 
-        $attendance = $this->attendanceService->clockIn($employee, $request->input('notes'));
+        try {
+            $attendance = $this->attendanceService->clockIn($employee, $request->input('notes'));
 
-        AuditLogger::log(
-            action: 'clock_in',
-            module: 'attendance',
-            modelType: Attendance::class,
-            modelId: $attendance->id
-        );
+            AuditLogger::log(
+                action: 'clock_in',
+                module: 'attendance',
+                modelType: Attendance::class,
+                modelId: $attendance->id
+            );
 
-        return back()->with('success', 'Clock-in successful at ' . Carbon::parse($attendance->clock_in)->format('H:i:s'));
+            return back()->with('success', 'Clock-in successful at ' . Carbon::parse($attendance->clock_in)->format('H:i:s'));
+        } catch (\Throwable $e) {
+            return back()->with('error', $e->getMessage());
+        }
     }
 
     public function clockOut(Request $request)
@@ -120,17 +124,21 @@ class AttendanceController extends Controller
             return back()->with('error', 'No employee profile linked to your user account.');
         }
 
-        $attendance = $this->attendanceService->clockOut($employee, $request->input('notes'));
+        try {
+            $attendance = $this->attendanceService->clockOut($employee, $request->input('notes'));
 
-        AuditLogger::log(
-            action: 'clock_out',
-            module: 'attendance',
-            modelType: Attendance::class,
-            modelId: $attendance->id,
-            changes: ['work_hours' => $attendance->work_hours]
-        );
+            AuditLogger::log(
+                action: 'clock_out',
+                module: 'attendance',
+                modelType: Attendance::class,
+                modelId: $attendance->id,
+                changes: ['work_hours' => $attendance->work_hours]
+            );
 
-        return back()->with('success', "Clock-out successful! Total work hours today: {$attendance->work_hours} hrs.");
+            return back()->with('success', "Clock-out successful! Total work hours today: {$attendance->work_hours} hrs.");
+        } catch (\Throwable $e) {
+            return back()->with('error', $e->getMessage());
+        }
     }
 
     public function adjust(Request $request, Attendance $attendance)

@@ -3,16 +3,15 @@
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Route;
 
-Route::get('/user', function (Request $request) {
-    return $request->user();
-})->middleware('auth:sanctum');
+Route::middleware('auth')->get('/user', function (Request $request) {
+    return response()->json($request->user());
+});
 
 Route::get('/health', function () {
     return response()->json([
         'status' => 'healthy',
-        'application' => 'HRIS Enterprise',
-        'database' => 'PostgreSQL 18',
-        'framework' => 'Laravel 13',
+        'application' => config('app.name', 'HRIS Enterprise'),
+        'database' => config('database.default', 'pgsql'),
         'timestamp' => now()->toIso8601String(),
     ]);
 });

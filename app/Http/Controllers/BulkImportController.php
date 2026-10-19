@@ -111,15 +111,23 @@ class BulkImportController extends Controller
             'Content-Disposition' => 'attachment; filename="import_errors_' . $log->id . '.csv"',
         ];
 
-        $callback = function () use ($errors) {
+        $sanitizeCsv = function ($val) {
+            $val = (string)($val ?? '');
+            if (strlen($val) > 0 && in_array($val[0], ['=', '+', '-', '@', "\t", "\r"])) {
+                return "'" . $val;
+            }
+            return $val;
+        };
+
+        $callback = function () use ($errors, $sanitizeCsv) {
             $handle = fopen('php://output', 'w');
             fputcsv($handle, ['Row Number', 'Identifier', 'Error Reason']);
 
             foreach ($errors as $err) {
                 fputcsv($handle, [
-                    $err['row'] ?? 'N/A',
-                    $err['identifier'] ?? 'N/A',
-                    $err['error'] ?? 'Unknown error',
+                    $sanitizeCsv($err['row'] ?? 'N/A'),
+                    $sanitizeCsv($err['identifier'] ?? 'N/A'),
+                    $sanitizeCsv($err['error'] ?? 'Unknown error'),
                 ]);
             }
 

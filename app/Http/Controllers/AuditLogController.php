@@ -16,7 +16,7 @@ class AuditLogController extends Controller
         }
 
         if ($search = $request->input('search')) {
-            $query->where('action', 'ilike', "%{$search}%");
+            $query->whereRaw('LOWER(action) LIKE ?', ['%' . strtolower($search) . '%']);
         }
 
         $logs = $query->orderByDesc('created_at')->paginate(25)->withQueryString();

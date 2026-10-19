@@ -44,8 +44,8 @@ return new class extends Migration
             $table->string('bank_holder_name')->nullable();
             $table->string('tax_id')->nullable();
             
-            // PostgreSQL 18 JSONB column for dynamic metadata/documents
-            $table->jsonb('custom_attributes')->nullable();
+            // Portable JSON column for dynamic metadata/documents (PostgreSQL jsonb, MySQL json, SQLite text)
+            $table->json('custom_attributes')->nullable();
 
             $table->timestamps();
             $table->softDeletes();

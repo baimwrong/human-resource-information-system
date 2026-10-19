@@ -26,11 +26,12 @@ class EmployeeController extends Controller
         // Search filter
         if ($search = $request->input('search')) {
             $query->where(function ($q) use ($search) {
-                $q->where('employee_code', 'ilike', "%{$search}%")
-                  ->orWhere('first_name', 'ilike', "%{$search}%")
-                  ->orWhere('last_name', 'ilike', "%{$search}%")
-                  ->orWhereHas('user', function ($uq) use ($search) {
-                      $uq->where('email', 'ilike', "%{$search}%");
+                $term = '%' . strtolower($search) . '%';
+                $q->whereRaw('LOWER(employee_code) LIKE ?', [$term])
+                  ->orWhereRaw('LOWER(first_name) LIKE ?', [$term])
+                  ->orWhereRaw('LOWER(last_name) LIKE ?', [$term])
+                  ->orWhereHas('user', function ($uq) use ($term) {
+                      $uq->whereRaw('LOWER(email) LIKE ?', [$term]);
                   });
             });
         }
@@ -162,26 +163,34 @@ class EmployeeController extends Controller
 
     public function show(Employee $employee)
     {
-        $employee->load([
+        $user = Auth::user();
+        $canViewFinancials = $user->isHR() || ($user->employee && $user->employee->id === $employee->id);
+
+        $relations = [
             'user',
             'department',
             'designation',
             'manager',
             'shift',
-            'salaryStructure',
             'subordinates',
             'leaveBalances.leaveType',
             'leaveRequests.leaveType',
             'attendances' => function ($q) {
                 $q->orderByDesc('date')->take(30);
             },
-            'payslips' => function ($q) {
-                $q->orderByDesc('year')->orderByDesc('month')->take(12);
-            },
             'performanceReviews.reviewer',
-        ]);
+        ];
 
-        return view('employees.show', compact('employee'));
+        if ($canViewFinancials) {
+            $relations[] = 'salaryStructure';
+            $relations['payslips'] = function ($q) {
+                $q->orderByDesc('year')->orderByDesc('month')->take(12);
+            };
+        }
+
+        $employee->load($relations);
+
+        return view('employees.show', compact('employee', 'canViewFinancials'));
     }
 
     public function edit(Employee $employee)
@@ -300,12 +309,24 @@ class EmployeeController extends Controller
             ->orderBy('employee_code')
             ->get();
 
+        if (! Auth::user()->isHR()) {
+            abort(403, 'Unauthorized. Only HR and Administrators can export employee records.');
+        }
+
         $headers = [
             'Content-Type' => 'text/csv',
             'Content-Disposition' => 'attachment; filename="employees_export_' . date('Ymd_His') . '.csv"',
         ];
 
-        $callback = function () use ($employees) {
+        $sanitizeCsv = function ($val) {
+            $val = (string)($val ?? '');
+            if (strlen($val) > 0 && in_array($val[0], ['=', '+', '-', '@', "\t", "\r"])) {
+                return "'" . $val;
+            }
+            return $val;
+        };
+
+        $callback = function () use ($employees, $sanitizeCsv) {
             $handle = fopen('php://output', 'w');
             fputcsv($handle, [
                 'Employee Code',
@@ -323,17 +344,17 @@ class EmployeeController extends Controller
 
             foreach ($employees as $emp) {
                 fputcsv($handle, [
-                    $emp->employee_code,
-                    $emp->full_name,
-                    $emp->user?->email ?? '',
-                    $emp->department?->name ?? '',
-                    $emp->designation?->title ?? '',
-                    ucfirst($emp->gender),
-                    $emp->phone ?? '',
-                    ucfirst($emp->employment_status),
-                    ucfirst($emp->employment_type),
-                    $emp->join_date ? $emp->join_date->format('Y-m-d') : '',
-                    $emp->salaryStructure?->basic_salary ?? 0,
+                    $sanitizeCsv($emp->employee_code),
+                    $sanitizeCsv($emp->full_name),
+                    $sanitizeCsv($emp->user?->email ?? ''),
+                    $sanitizeCsv($emp->department?->name ?? ''),
+                    $sanitizeCsv($emp->designation?->title ?? ''),
+                    $sanitizeCsv(ucfirst($emp->gender)),
+                    $sanitizeCsv($emp->phone ?? ''),
+                    $sanitizeCsv(ucfirst($emp->employment_status)),
+                    $sanitizeCsv(ucfirst($emp->employment_type)),
+                    $sanitizeCsv($emp->join_date ? $emp->join_date->format('Y-m-d') : ''),
+                    $sanitizeCsv($emp->salaryStructure?->basic_salary ?? 0),
                 ]);
             }
 

@@ -2,12 +2,14 @@
 
 namespace App\Services;
 
-use App\Models\PayrollBatch;
-use App\Models\Payslip;
+use App\Models\Attendance;
 use App\Models\Employee;
 use App\Models\LeaveRequest;
-use App\Models\Attendance;
+use App\Models\PayrollBatch;
+use App\Models\Payslip;
+use App\Models\Setting;
 use Carbon\Carbon;
+use Carbon\CarbonPeriod;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Str;
 
@@ -22,6 +24,10 @@ class PayrollCalculationService
             // Check if batch already exists
             $batchNumber = sprintf('PAY-%04d-%02d', $year, $month);
             $batch = PayrollBatch::where('month', $month)->where('year', $year)->first();
+
+            if ($batch && $batch->status === 'paid') {
+                throw new \RuntimeException("Payroll batch for {$batch->period_name} is already finalized and marked as PAID. It cannot be re-generated.");
+            }
 
             if (! $batch) {
                 $batch = PayrollBatch::create([
@@ -48,6 +54,12 @@ class PayrollCalculationService
             $startDate = Carbon::createFromDate($year, $month, 1)->startOfMonth();
             $endDate = $startDate->copy()->endOfMonth();
 
+            // Configurable work days and localization from settings
+            $workDays = max(1, (int)Setting::get('work_days_per_month', 22));
+            $companyName = Setting::get('company_name', 'Acme Global Technologies Inc.');
+            $companyAddress = Setting::get('company_address', 'Level 24, Cyber Tower One, Jakarta');
+            $currencySymbol = Setting::get('currency_symbol', 'IDR');
+
             foreach ($employees as $employee) {
                 $salary = $employee->salaryStructure;
                 $basic = $salary ? (float)$salary->basic_salary : 0.00;
@@ -56,47 +68,92 @@ class PayrollCalculationService
                     continue; // Skip employee without configured salary
                 }
 
+                $dailyRate = round($basic / $workDays, 2);
+                $hourlyRate = round($basic / ($workDays * 8), 2);
+
                 $house = $salary ? (float)$salary->house_allowance : 0.00;
                 $transport = $salary ? (float)$salary->transport_allowance : 0.00;
                 $meal = $salary ? (float)$salary->meal_allowance : 0.00;
                 $otherAllowances = $salary ? (float)$salary->other_allowances : 0.00;
-                $totalAllowance = $house + $transport + $meal + $otherAllowances;
 
-                // Deductions
+                // Overtime pay calculation from Attendance logs (1.5x hourly rate)
+                $overtimeHours = (float)Attendance::where('employee_id', $employee->id)
+                    ->whereBetween('date', [$startDate->toDateString(), $endDate->toDateString()])
+                    ->sum('overtime_hours');
+                $overtimePay = round($overtimeHours * $hourlyRate * 1.5, 2);
+
+                $totalAllowance = $house + $transport + $meal + $otherAllowances + $overtimePay;
+
+                // Fixed statutory deductions
                 $tax = $salary ? (float)$salary->tax_deduction : 0.00;
                 $insurance = $salary ? (float)$salary->insurance_deduction : 0.00;
                 $otherDeductions = $salary ? (float)$salary->other_deductions : 0.00;
 
-                // Check unpaid leaves in this month
-                $unpaidLeaves = LeaveRequest::where('employee_id', $employee->id)
+                // Accurate Unpaid Leaves calculation strictly within this month
+                $unpaidLeaveRequests = LeaveRequest::where('employee_id', $employee->id)
                     ->where('status', 'approved')
                     ->whereHas('leaveType', function ($q) {
                         $q->where('is_paid', false);
                     })
-                    ->whereBetween('start_date', [$startDate->toDateString(), $endDate->toDateString()])
-                    ->sum('total_days');
+                    ->where('start_date', '<=', $endDate->toDateString())
+                    ->where('end_date', '>=', $startDate->toDateString())
+                    ->get();
 
-                $dailyRate = $basic > 0 ? round($basic / 22, 2) : 0;
-                $unpaidLeaveDeduction = round((float)$unpaidLeaves * $dailyRate, 2);
+                $unpaidLeaveDays = 0;
+                foreach ($unpaidLeaveRequests as $req) {
+                    $lStart = Carbon::parse($req->start_date)->max($startDate);
+                    $lEnd = Carbon::parse($req->end_date)->min($endDate);
+                    $p = CarbonPeriod::create($lStart, $lEnd);
+                    foreach ($p as $d) {
+                        if (! $d->isWeekend()) {
+                            $unpaidLeaveDays++;
+                        }
+                    }
+                }
+                $unpaidLeaveDeduction = round((float)$unpaidLeaveDays * $dailyRate, 2);
 
-                $totalDeduction = $tax + $insurance + $otherDeductions + $unpaidLeaveDeduction;
+                // Unexcused Absenteeism deduction from Attendance
+                $absentDays = Attendance::where('employee_id', $employee->id)
+                    ->whereBetween('date', [$startDate->toDateString(), $endDate->toDateString()])
+                    ->where('status', 'absent')
+                    ->count();
+                $absentDeduction = round((float)$absentDays * $dailyRate, 2);
+
+                $totalDeduction = $tax + $insurance + $otherDeductions + $unpaidLeaveDeduction + $absentDeduction;
                 $netSalary = max(0, ($basic + $totalAllowance) - $totalDeduction);
 
+                $earningsList = [
+                    ['label' => 'Basic Salary', 'amount' => $basic],
+                    ['label' => 'Housing Allowance', 'amount' => $house],
+                    ['label' => 'Transport Allowance', 'amount' => $transport],
+                    ['label' => 'Meal Allowance', 'amount' => $meal],
+                    ['label' => 'Other Allowance', 'amount' => $otherAllowances],
+                ];
+                if ($overtimePay > 0) {
+                    $earningsList[] = ['label' => "Overtime Compensation ({$overtimeHours} hrs @ 1.5x)", 'amount' => $overtimePay];
+                }
+
+                $deductionsList = [
+                    ['label' => 'Income Tax (PPh 21)', 'amount' => $tax],
+                    ['label' => 'Health & Social Insurance', 'amount' => $insurance],
+                ];
+                if ($unpaidLeaveDeduction > 0) {
+                    $deductionsList[] = ['label' => "Unpaid Leave ({$unpaidLeaveDays} days)", 'amount' => $unpaidLeaveDeduction];
+                }
+                if ($absentDeduction > 0) {
+                    $deductionsList[] = ['label' => "Unexcused Absence ({$absentDays} days)", 'amount' => $absentDeduction];
+                }
+                if ($otherDeductions > 0) {
+                    $deductionsList[] = ['label' => 'Other Deductions', 'amount' => $otherDeductions];
+                }
+
                 $breakdown = [
-                    'earnings' => [
-                        ['label' => 'Basic Salary', 'amount' => $basic],
-                        ['label' => 'Housing Allowance', 'amount' => $house],
-                        ['label' => 'Transport Allowance', 'amount' => $transport],
-                        ['label' => 'Meal Allowance', 'amount' => $meal],
-                        ['label' => 'Other Allowance', 'amount' => $otherAllowances],
-                    ],
-                    'deductions' => [
-                        ['label' => 'Income Tax (PPh 21)', 'amount' => $tax],
-                        ['label' => 'Health & Social Insurance', 'amount' => $insurance],
-                        ['label' => 'Unpaid Leave Penalty (' . $unpaidLeaves . ' days)', 'amount' => $unpaidLeaveDeduction],
-                        ['label' => 'Other Deductions', 'amount' => $otherDeductions],
-                    ],
+                    'earnings' => $earningsList,
+                    'deductions' => $deductionsList,
                     'metadata' => [
+                        'company_name' => $companyName,
+                        'company_address' => $companyAddress,
+                        'currency_symbol' => $currencySymbol,
                         'department' => $employee->department?->name ?? 'N/A',
                         'designation' => $employee->designation?->title ?? 'N/A',
                         'bank_name' => $employee->bank_name ?? 'N/A',

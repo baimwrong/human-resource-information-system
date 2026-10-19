@@ -68,4 +68,19 @@ class PerformanceReviewController extends Controller
         $performanceReview->load(['employee.department', 'employee.designation', 'reviewer']);
         return view('performance.show', compact('performanceReview'));
     }
+
+    public function destroy(PerformanceReview $performanceReview)
+    {
+        $id = $performanceReview->id;
+        $performanceReview->delete();
+
+        AuditLogger::log(
+            action: 'deleted_performance_review',
+            module: 'performance',
+            modelType: PerformanceReview::class,
+            modelId: $id
+        );
+
+        return redirect()->route('performance.index')->with('success', 'Performance review deleted.');
+    }
 }

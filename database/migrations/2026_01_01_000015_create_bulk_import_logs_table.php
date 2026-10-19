@@ -20,7 +20,7 @@ return new class extends Migration
             $table->integer('successful_rows')->default(0);
             $table->integer('failed_rows')->default(0);
             $table->enum('status', ['completed', 'failed', 'partial'])->default('completed')->index();
-            $table->jsonb('error_details')->nullable();
+            $table->json('error_details')->nullable();
             $table->timestamps();
         });
     }

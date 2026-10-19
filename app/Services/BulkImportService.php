@@ -59,7 +59,7 @@ class BulkImportService
     }
 
     /**
-     * Process bulk import from CSV file.
+     * Process bulk import from CSV file using memory-efficient streaming and cached lookups.
      */
     public function processImport(
         string $type,
@@ -72,94 +72,135 @@ class BulkImportService
             throw new \RuntimeException("CSV file cannot be read: {$filePath}");
         }
 
-        $rows = array_map('str_getcsv', file($filePath));
-        if (empty($rows) || count($rows) < 2) {
-            throw new \RuntimeException("CSV file is empty or missing data rows.");
+        $handle = fopen($filePath, 'r');
+        if ($handle === false) {
+            throw new \RuntimeException("Failed to open CSV file: {$filePath}");
         }
 
-        // Clean UTF-8 BOM if present on headers
-        $headers = array_map(function ($h) {
-            return trim(preg_replace('/[\x00-\x1F\x80-\xFF]/', '', strtolower(trim($h))));
-        }, array_shift($rows));
+        try {
+            // Read header row
+            $rawHeaders = fgetcsv($handle);
+            if ($rawHeaders === false || empty(array_filter($rawHeaders))) {
+                throw new \RuntimeException("CSV file is empty or missing header row.");
+            }
 
-        $totalRows = count($rows);
-        $successfulRows = 0;
-        $failedRows = 0;
-        $errorDetails = [];
+            // Strip UTF-8 BOM if present on the first header
+            $rawHeaders[0] = preg_replace('/^\xEF\xBB\xBF/', '', (string) $rawHeaders[0]);
 
-        $executionClosure = function () use (
-            $type,
-            $headers,
-            $rows,
-            $rollbackOnError,
-            &$successfulRows,
-            &$failedRows,
-            &$errorDetails
-        ) {
-            foreach ($rows as $index => $row) {
-                $rowNumber = $index + 2; // Accounting for 1-based index and header line
+            $headers = array_map(function ($h) {
+                return trim(preg_replace('/[\x00-\x1F\x80-\xFF]/', '', strtolower(trim((string) $h))));
+            }, $rawHeaders);
 
-                // Skip blank lines
-                if (empty(array_filter($row))) {
-                    continue;
+            // Pre-cache lookup maps to avoid N+1 query storms during bulk iteration
+            $context = [
+                'departments' => [],
+                'designations' => [],
+                'leave_types' => null,
+                'employees' => [],
+            ];
+
+            if ($type === self::TYPE_EMPLOYEES) {
+                foreach (Department::all(['id', 'code', 'name']) as $dept) {
+                    $context['departments'][strtoupper($dept->code)] = $dept->id;
+                    $context['departments'][strtoupper($dept->name)] = $dept->id;
                 }
+                foreach (Designation::all(['id', 'code', 'title']) as $desig) {
+                    $context['designations'][strtoupper($desig->code)] = $desig->id;
+                    $context['designations'][strtoupper($desig->title)] = $desig->id;
+                }
+                $context['leave_types'] = LeaveType::all();
+            }
 
-                if (count($row) !== count($headers)) {
-                    $failedRows++;
-                    $errorDetails[] = [
-                        'row' => $rowNumber,
-                        'identifier' => 'Row ' . $rowNumber,
-                        'error' => 'Column count mismatch. Expected ' . count($headers) . ' columns, found ' . count($row),
-                    ];
-                    if ($rollbackOnError) {
-                        throw new \Exception("Row {$rowNumber}: Column count mismatch.");
+            $totalRows = 0;
+            $successfulRows = 0;
+            $failedRows = 0;
+            $errorDetails = [];
+
+            $streamProcessor = function () use (
+                $handle,
+                $type,
+                $headers,
+                $rollbackOnError,
+                &$context,
+                &$totalRows,
+                &$successfulRows,
+                &$failedRows,
+                &$errorDetails
+            ) {
+                $rowNumber = 1; // Header was row 1
+
+                while (($row = fgetcsv($handle)) !== false) {
+                    $rowNumber++;
+
+                    // Skip empty / blank lines
+                    if (empty(array_filter($row))) {
+                        continue;
                     }
-                    continue;
+
+                    $totalRows++;
+
+                    if (count($row) !== count($headers)) {
+                        $failedRows++;
+                        $errorDetails[] = [
+                            'row' => $rowNumber,
+                            'identifier' => 'Row ' . $rowNumber,
+                            'error' => 'Column count mismatch. Expected ' . count($headers) . ' columns, found ' . count($row),
+                        ];
+                        if ($rollbackOnError) {
+                            throw new \Exception("Row {$rowNumber}: Column count mismatch.");
+                        }
+                        continue;
+                    }
+
+                    $data = array_combine($headers, array_map('trim', $row));
+
+                    try {
+                        match ($type) {
+                            self::TYPE_EMPLOYEES => $this->importEmployeeRow($data, $rowNumber, $context),
+                            self::TYPE_DEPARTMENTS => $this->importDepartmentRow($data, $rowNumber),
+                            self::TYPE_ATTENDANCE => $this->importAttendanceRow($data, $rowNumber, $context),
+                            self::TYPE_SALARIES => $this->importSalaryRow($data, $rowNumber, $context),
+                            default => throw new \InvalidArgumentException("Invalid import type: {$type}"),
+                        };
+
+                        $successfulRows++;
+                    } catch (\Throwable $e) {
+                        $failedRows++;
+                        $errorDetails[] = [
+                            'row' => $rowNumber,
+                            'identifier' => $data['employee_code'] ?? ($data['code'] ?? 'Row ' . $rowNumber),
+                            'error' => $e->getMessage(),
+                        ];
+
+                        if ($rollbackOnError) {
+                            throw $e;
+                        }
+                    }
                 }
 
-                $data = array_combine($headers, array_map('trim', $row));
+                if ($totalRows === 0) {
+                    throw new \RuntimeException("CSV file does not contain any data rows.");
+                }
+            };
 
+            if ($rollbackOnError) {
                 try {
-                    match ($type) {
-                        self::TYPE_EMPLOYEES => $this->importEmployeeRow($data, $rowNumber),
-                        self::TYPE_DEPARTMENTS => $this->importDepartmentRow($data, $rowNumber),
-                        self::TYPE_ATTENDANCE => $this->importAttendanceRow($data, $rowNumber),
-                        self::TYPE_SALARIES => $this->importSalaryRow($data, $rowNumber),
-                        default => throw new \InvalidArgumentException("Invalid import type: {$type}"),
-                    };
-
-                    $successfulRows++;
+                    DB::transaction($streamProcessor);
                 } catch (\Throwable $e) {
-                    $failedRows++;
-                    $errorDetails[] = [
-                        'row' => $rowNumber,
-                        'identifier' => $data['employee_code'] ?? ($data['code'] ?? 'Row ' . $rowNumber),
-                        'error' => $e->getMessage(),
-                    ];
-
-                    if ($rollbackOnError) {
-                        throw $e;
-                    }
+                    $successfulRows = 0;
                 }
+            } else {
+                $streamProcessor();
             }
-        };
-
-        if ($rollbackOnError) {
-            try {
-                DB::transaction($executionClosure);
-            } catch (\Throwable $e) {
-                // Whole import failed due to transaction rollback
-                $status = 'failed';
-                $successfulRows = 0;
+        } finally {
+            if (is_resource($handle)) {
+                fclose($handle);
             }
-        } else {
-            // Process row by row with partial commit
-            $executionClosure();
         }
 
         $status = ($failedRows === 0) ? 'completed' : (($successfulRows > 0) ? 'partial' : 'failed');
 
-        // Persist import log into PostgreSQL 18
+        // Persist import log
         $log = BulkImportLog::create([
             'user_id' => $userId,
             'import_type' => $type,
@@ -195,9 +236,9 @@ class BulkImportService
     }
 
     /**
-     * Import a single employee row.
+     * Import a single employee row with pre-cached lookups.
      */
-    protected function importEmployeeRow(array $data, int $rowNumber): void
+    protected function importEmployeeRow(array $data, int $rowNumber, array &$context = []): void
     {
         if (empty($data['employee_code']) || empty($data['first_name']) || empty($data['last_name']) || empty($data['email'])) {
             throw new \Exception("Missing required fields: employee_code, first_name, last_name, or email.");
@@ -207,30 +248,44 @@ class BulkImportService
             throw new \Exception("Invalid email format: {$data['email']}");
         }
 
+        $employeeCode = strtoupper(trim($data['employee_code']));
+
         // Check duplicates
-        if (Employee::where('employee_code', $data['employee_code'])->exists()) {
-            throw new \Exception("Employee code '{$data['employee_code']}' already exists.");
+        if (Employee::where('employee_code', $employeeCode)->exists()) {
+            throw new \Exception("Employee code '{$employeeCode}' already exists.");
         }
 
-        if (User::where('email', $data['email'])->exists()) {
+        if (User::where('email', strtolower($data['email']))->exists()) {
             throw new \Exception("Email '{$data['email']}' is already registered.");
         }
 
-        // Resolve Department
+        // Resolve Department via cached map or fallback
         $departmentId = null;
         if (! empty($data['department_code'])) {
-            $department = Department::where('code', $data['department_code'])->orWhere('name', $data['department_code'])->first();
-            if ($department) {
-                $departmentId = $department->id;
+            $deptKey = strtoupper(trim($data['department_code']));
+            if (isset($context['departments'][$deptKey])) {
+                $departmentId = $context['departments'][$deptKey];
+            } else {
+                $department = Department::where('code', $deptKey)->orWhere('name', $data['department_code'])->first();
+                if ($department) {
+                    $departmentId = $department->id;
+                    $context['departments'][$deptKey] = $departmentId;
+                }
             }
         }
 
-        // Resolve Designation
+        // Resolve Designation via cached map or fallback
         $designationId = null;
         if (! empty($data['designation_code'])) {
-            $designation = Designation::where('code', $data['designation_code'])->orWhere('title', $data['designation_code'])->first();
-            if ($designation) {
-                $designationId = $designation->id;
+            $desigKey = strtoupper(trim($data['designation_code']));
+            if (isset($context['designations'][$desigKey])) {
+                $designationId = $context['designations'][$desigKey];
+            } else {
+                $designation = Designation::where('code', $desigKey)->orWhere('title', $data['designation_code'])->first();
+                if ($designation) {
+                    $designationId = $designation->id;
+                    $context['designations'][$desigKey] = $designationId;
+                }
             }
         }
 
@@ -246,7 +301,7 @@ class BulkImportService
         // Create Employee
         $employee = Employee::create([
             'user_id' => $user->id,
-            'employee_code' => strtoupper($data['employee_code']),
+            'employee_code' => $employeeCode,
             'first_name' => $data['first_name'],
             'last_name' => $data['last_name'],
             'gender' => in_array(strtolower($data['gender'] ?? ''), ['male', 'female', 'other']) ? strtolower($data['gender']) : 'other',
@@ -258,6 +313,9 @@ class BulkImportService
             'employment_status' => 'active',
             'join_date' => ! empty($data['join_date']) ? Carbon::parse($data['join_date'])->toDateString() : Carbon::today()->toDateString(),
         ]);
+
+        // Cache for subsequent references
+        $context['employees'][$employeeCode] = $employee;
 
         // Initialize SalaryStructure if basic_salary is provided
         if (isset($data['basic_salary']) && is_numeric($data['basic_salary']) && (float)$data['basic_salary'] > 0) {
@@ -273,9 +331,9 @@ class BulkImportService
             ]);
         }
 
-        // Initialize annual leave balances for current year
+        // Initialize annual leave balances for current year using cached LeaveType collection
         $currentYear = (int)date('Y');
-        $leaveTypes = LeaveType::all();
+        $leaveTypes = $context['leave_types'] ?? LeaveType::all();
         foreach ($leaveTypes as $type) {
             LeaveBalance::firstOrCreate(
                 [
@@ -313,15 +371,24 @@ class BulkImportService
     }
 
     /**
-     * Import a single attendance record.
+     * Import a single attendance record with cached employee lookup.
      */
-    protected function importAttendanceRow(array $data, int $rowNumber): void
+    protected function importAttendanceRow(array $data, int $rowNumber, array &$context = []): void
     {
         if (empty($data['employee_code']) || empty($data['date'])) {
             throw new \Exception("Missing employee_code or date.");
         }
 
-        $employee = Employee::where('employee_code', strtoupper($data['employee_code']))->first();
+        $code = strtoupper(trim($data['employee_code']));
+        if (isset($context['employees'][$code])) {
+            $employee = $context['employees'][$code];
+        } else {
+            $employee = Employee::where('employee_code', $code)->first();
+            if ($employee) {
+                $context['employees'][$code] = $employee;
+            }
+        }
+
         if (! $employee) {
             throw new \Exception("Employee with code '{$data['employee_code']}' not found.");
         }
@@ -355,15 +422,24 @@ class BulkImportService
     }
 
     /**
-     * Import a single salary structure record.
+     * Import a single salary structure record with cached employee lookup.
      */
-    protected function importSalaryRow(array $data, int $rowNumber): void
+    protected function importSalaryRow(array $data, int $rowNumber, array &$context = []): void
     {
         if (empty($data['employee_code']) || ! isset($data['basic_salary'])) {
             throw new \Exception("Missing employee_code or basic_salary.");
         }
 
-        $employee = Employee::where('employee_code', strtoupper($data['employee_code']))->first();
+        $code = strtoupper(trim($data['employee_code']));
+        if (isset($context['employees'][$code])) {
+            $employee = $context['employees'][$code];
+        } else {
+            $employee = Employee::where('employee_code', $code)->first();
+            if ($employee) {
+                $context['employees'][$code] = $employee;
+            }
+        }
+
         if (! $employee) {
             throw new \Exception("Employee with code '{$data['employee_code']}' not found.");
         }

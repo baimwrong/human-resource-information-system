@@ -22,7 +22,7 @@ return new class extends Migration
             $table->decimal('overall_rating', 3, 2)->default(3.00);
             $table->text('strengths')->nullable();
             $table->text('areas_for_improvement')->nullable();
-            $table->jsonb('goals')->nullable();
+            $table->json('goals')->nullable();
             $table->enum('status', ['draft', 'submitted', 'completed'])->default('draft')->index();
             $table->timestamps();
         });
