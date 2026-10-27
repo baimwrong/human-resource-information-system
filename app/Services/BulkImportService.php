@@ -240,114 +240,116 @@ class BulkImportService
      */
     protected function importEmployeeRow(array $data, int $rowNumber, array &$context = []): void
     {
-        if (empty($data['employee_code']) || empty($data['first_name']) || empty($data['last_name']) || empty($data['email'])) {
-            throw new \Exception("Missing required fields: employee_code, first_name, last_name, or email.");
-        }
+        DB::transaction(function () use ($data, $rowNumber, &$context) {
+            if (empty($data['employee_code']) || empty($data['first_name']) || empty($data['last_name']) || empty($data['email'])) {
+                throw new \Exception("Missing required fields: employee_code, first_name, last_name, or email.");
+            }
 
-        if (! filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
-            throw new \Exception("Invalid email format: {$data['email']}");
-        }
+            if (! filter_var($data['email'], FILTER_VALIDATE_EMAIL)) {
+                throw new \Exception("Invalid email format: {$data['email']}");
+            }
 
-        $employeeCode = strtoupper(trim($data['employee_code']));
+            $employeeCode = strtoupper(trim($data['employee_code']));
 
-        // Check duplicates
-        if (Employee::where('employee_code', $employeeCode)->exists()) {
-            throw new \Exception("Employee code '{$employeeCode}' already exists.");
-        }
+            // Check duplicates
+            if (Employee::where('employee_code', $employeeCode)->exists()) {
+                throw new \Exception("Employee code '{$employeeCode}' already exists.");
+            }
 
-        if (User::where('email', strtolower($data['email']))->exists()) {
-            throw new \Exception("Email '{$data['email']}' is already registered.");
-        }
+            if (User::where('email', strtolower($data['email']))->exists()) {
+                throw new \Exception("Email '{$data['email']}' is already registered.");
+            }
 
-        // Resolve Department via cached map or fallback
-        $departmentId = null;
-        if (! empty($data['department_code'])) {
-            $deptKey = strtoupper(trim($data['department_code']));
-            if (isset($context['departments'][$deptKey])) {
-                $departmentId = $context['departments'][$deptKey];
-            } else {
-                $department = Department::where('code', $deptKey)->orWhere('name', $data['department_code'])->first();
-                if ($department) {
-                    $departmentId = $department->id;
-                    $context['departments'][$deptKey] = $departmentId;
+            // Resolve Department via cached map or fallback
+            $departmentId = null;
+            if (! empty($data['department_code'])) {
+                $deptKey = strtoupper(trim($data['department_code']));
+                if (isset($context['departments'][$deptKey])) {
+                    $departmentId = $context['departments'][$deptKey];
+                } else {
+                    $department = Department::where('code', $deptKey)->orWhere('name', $data['department_code'])->first();
+                    if ($department) {
+                        $departmentId = $department->id;
+                        $context['departments'][$deptKey] = $departmentId;
+                    }
                 }
             }
-        }
 
-        // Resolve Designation via cached map or fallback
-        $designationId = null;
-        if (! empty($data['designation_code'])) {
-            $desigKey = strtoupper(trim($data['designation_code']));
-            if (isset($context['designations'][$desigKey])) {
-                $designationId = $context['designations'][$desigKey];
-            } else {
-                $designation = Designation::where('code', $desigKey)->orWhere('title', $data['designation_code'])->first();
-                if ($designation) {
-                    $designationId = $designation->id;
-                    $context['designations'][$desigKey] = $designationId;
+            // Resolve Designation via cached map or fallback
+            $designationId = null;
+            if (! empty($data['designation_code'])) {
+                $desigKey = strtoupper(trim($data['designation_code']));
+                if (isset($context['designations'][$desigKey])) {
+                    $designationId = $context['designations'][$desigKey];
+                } else {
+                    $designation = Designation::where('code', $desigKey)->orWhere('title', $data['designation_code'])->first();
+                    if ($designation) {
+                        $designationId = $designation->id;
+                        $context['designations'][$desigKey] = $designationId;
+                    }
                 }
             }
-        }
 
-        // Create portal User account
-        $user = User::create([
-            'name' => trim($data['first_name'] . ' ' . $data['last_name']),
-            'email' => strtolower($data['email']),
-            'password' => Hash::make('Password123!'),
-            'role' => 'employee',
-            'is_active' => true,
-        ]);
-
-        // Create Employee
-        $employee = Employee::create([
-            'user_id' => $user->id,
-            'employee_code' => $employeeCode,
-            'first_name' => $data['first_name'],
-            'last_name' => $data['last_name'],
-            'gender' => in_array(strtolower($data['gender'] ?? ''), ['male', 'female', 'other']) ? strtolower($data['gender']) : 'other',
-            'date_of_birth' => ! empty($data['date_of_birth']) ? Carbon::parse($data['date_of_birth'])->toDateString() : null,
-            'phone' => $data['phone'] ?? null,
-            'department_id' => $departmentId,
-            'designation_id' => $designationId,
-            'employment_type' => in_array(strtolower($data['employment_type'] ?? ''), ['permanent', 'probation', 'contract', 'intern']) ? strtolower($data['employment_type']) : 'permanent',
-            'employment_status' => 'active',
-            'join_date' => ! empty($data['join_date']) ? Carbon::parse($data['join_date'])->toDateString() : Carbon::today()->toDateString(),
-        ]);
-
-        // Cache for subsequent references
-        $context['employees'][$employeeCode] = $employee;
-
-        // Initialize SalaryStructure if basic_salary is provided
-        if (isset($data['basic_salary']) && is_numeric($data['basic_salary']) && (float)$data['basic_salary'] > 0) {
-            SalaryStructure::create([
-                'employee_id' => $employee->id,
-                'basic_salary' => (float)$data['basic_salary'],
-                'house_allowance' => 0.00,
-                'transport_allowance' => 0.00,
-                'meal_allowance' => 0.00,
-                'tax_deduction' => 0.00,
-                'insurance_deduction' => 0.00,
-                'effective_date' => $employee->join_date,
+            // Create portal User account
+            $user = User::create([
+                'name' => trim($data['first_name'] . ' ' . $data['last_name']),
+                'email' => strtolower($data['email']),
+                'password' => Hash::make('Password123!'),
+                'role' => 'employee',
+                'is_active' => true,
             ]);
-        }
 
-        // Initialize annual leave balances for current year using cached LeaveType collection
-        $currentYear = (int)date('Y');
-        $leaveTypes = $context['leave_types'] ?? LeaveType::all();
-        foreach ($leaveTypes as $type) {
-            LeaveBalance::firstOrCreate(
-                [
+            // Create Employee
+            $employee = Employee::create([
+                'user_id' => $user->id,
+                'employee_code' => $employeeCode,
+                'first_name' => $data['first_name'],
+                'last_name' => $data['last_name'],
+                'gender' => in_array(strtolower($data['gender'] ?? ''), ['male', 'female', 'other']) ? strtolower($data['gender']) : 'other',
+                'date_of_birth' => ! empty($data['date_of_birth']) ? Carbon::parse($data['date_of_birth'])->toDateString() : null,
+                'phone' => $data['phone'] ?? null,
+                'department_id' => $departmentId,
+                'designation_id' => $designationId,
+                'employment_type' => in_array(strtolower($data['employment_type'] ?? ''), ['permanent', 'probation', 'contract', 'intern']) ? strtolower($data['employment_type']) : 'permanent',
+                'employment_status' => 'active',
+                'join_date' => ! empty($data['join_date']) ? Carbon::parse($data['join_date'])->toDateString() : Carbon::today()->toDateString(),
+            ]);
+
+            // Cache for subsequent references
+            $context['employees'][$employeeCode] = $employee;
+
+            // Initialize SalaryStructure if basic_salary is provided
+            if (isset($data['basic_salary']) && is_numeric($data['basic_salary']) && (float)$data['basic_salary'] > 0) {
+                SalaryStructure::create([
                     'employee_id' => $employee->id,
-                    'leave_type_id' => $type->id,
-                    'year' => $currentYear,
-                ],
-                [
-                    'allocated_days' => $type->days_allowed,
-                    'used_days' => 0,
-                    'pending_days' => 0,
-                ]
-            );
-        }
+                    'basic_salary' => (float)$data['basic_salary'],
+                    'house_allowance' => 0.00,
+                    'transport_allowance' => 0.00,
+                    'meal_allowance' => 0.00,
+                    'tax_deduction' => 0.00,
+                    'insurance_deduction' => 0.00,
+                    'effective_date' => $employee->join_date,
+                ]);
+            }
+
+            // Initialize annual leave balances for current year using cached LeaveType collection
+            $currentYear = (int)date('Y');
+            $leaveTypes = $context['leave_types'] ?? LeaveType::all();
+            foreach ($leaveTypes as $type) {
+                LeaveBalance::firstOrCreate(
+                    [
+                        'employee_id' => $employee->id,
+                        'leave_type_id' => $type->id,
+                        'year' => $currentYear,
+                    ],
+                    [
+                        'allocated_days' => $type->days_allowed,
+                        'used_days' => 0,
+                        'pending_days' => 0,
+                    ]
+                );
+            }
+        });
     }
 
     /**
@@ -400,8 +402,9 @@ class BulkImportService
         $workHours = 0.00;
         $overtimeHours = 0.00;
         if ($clockIn && $clockOut) {
-            $minutes = max(0, $clockOut->diffInMinutes($clockIn));
-            $workHours = round($minutes / 60, 2);
+            $minutes = abs($clockOut->diffInMinutes($clockIn));
+            $elapsedHours = round($minutes / 60, 2);
+            $workHours = $elapsedHours >= 5.0 ? max(0, round($elapsedHours - 1.0, 2)) : $elapsedHours;
             $overtimeHours = max(0, round($workHours - 8.0, 2));
         }
 

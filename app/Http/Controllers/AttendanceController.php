@@ -157,8 +157,9 @@ class AttendanceController extends Controller
         $workHours = 0.00;
         $overtimeHours = 0.00;
         if ($clockIn && $clockOut) {
-            $minutes = max(0, $clockOut->diffInMinutes($clockIn));
-            $workHours = round($minutes / 60, 2);
+            $minutes = abs($clockOut->diffInMinutes($clockIn));
+            $elapsedHours = round($minutes / 60, 2);
+            $workHours = $elapsedHours >= 5.0 ? max(0, round($elapsedHours - 1.0, 2)) : $elapsedHours;
             $overtimeHours = max(0, round($workHours - 8.0, 2));
         }
 

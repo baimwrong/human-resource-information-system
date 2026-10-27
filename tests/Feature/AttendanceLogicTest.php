@@ -59,23 +59,25 @@ class AttendanceLogicTest extends TestCase
 
     public function test_clock_in_creates_record_and_prevents_duplicate(): void
     {
-        $attendance = $this->attendanceService->clockIn($this->employee->id);
+        $attendance = $this->attendanceService->clockIn($this->employee);
 
         $this->assertNotNull($attendance);
+        $this->assertEquals(Carbon::today()->toDateString(), $attendance->date->toDateString());
         $this->assertDatabaseHas('attendances', [
             'employee_id' => $this->employee->id,
-            'date' => Carbon::today()->toDateString(),
         ]);
 
-        // Attempt second clock-in on the same day -> must throw ValidationException
-        $this->expectException(ValidationException::class);
-        $this->attendanceService->clockIn($this->employee->id);
+        // Attempt second clock-in on the same day -> must throw RuntimeException
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('You have already clocked in today');
+        $this->attendanceService->clockIn($this->employee);
     }
 
     public function test_clock_out_without_clock_in_throws_exception(): void
     {
-        $this->expectException(ValidationException::class);
-        $this->attendanceService->clockOut($this->employee->id);
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Cannot clock out: You have not clocked in for today yet.');
+        $this->attendanceService->clockOut($this->employee);
     }
 
     public function test_clock_in_blocked_when_on_approved_leave(): void
@@ -97,7 +99,41 @@ class AttendanceLogicTest extends TestCase
             'status' => 'approved',
         ]);
 
-        $this->expectException(ValidationException::class);
-        $this->attendanceService->clockIn($this->employee->id);
+        Attendance::create([
+            'employee_id' => $this->employee->id,
+            'date' => Carbon::today()->toDateString(),
+            'status' => 'on_leave',
+            'notes' => 'On approved leave: ' . $leaveType->name,
+        ]);
+
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('Cannot clock in: You are scheduled on approved leave for today.');
+        $this->attendanceService->clockIn($this->employee);
+    }
+
+    public function test_night_shift_clock_out_across_midnight(): void
+    {
+        // Set fixed test now at 06:00 on Oct 27
+        Carbon::setTestNow(Carbon::parse('2026-10-27 06:00:00'));
+
+        // 1. Clock in yesterday at 22:00 (Oct 26)
+        $clockInTime = Carbon::parse('2026-10-26 22:00:00');
+        $attendance = Attendance::create([
+            'employee_id' => $this->employee->id,
+            'date' => '2026-10-26',
+            'clock_in' => $clockInTime,
+            'status' => 'present',
+        ]);
+
+        // 2. Clock out today at 06:00 (8 elapsed hours)
+        $updatedAttendance = $this->attendanceService->clockOut($this->employee);
+
+        $this->assertNotNull($updatedAttendance->clock_out);
+        $this->assertEquals($attendance->id, $updatedAttendance->id);
+        // 8 elapsed hours minus 1 hour meal break = 7.00 effective work hours
+        $this->assertEquals(7.00, (float)$updatedAttendance->work_hours);
+        $this->assertEquals(0.00, (float)$updatedAttendance->overtime_hours);
+
+        Carbon::setTestNow(); // Reset mocked time
     }
 }

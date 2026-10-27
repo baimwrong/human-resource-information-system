@@ -5,7 +5,7 @@
     "keywords": ["hris", "human-resources", "laravel-13", "postgresql-18", "payroll", "attendance", "leaves", "bulk-import"],
     "license": "MIT",
     "require": {
-        "php": "^8.2 || ^8.3 || ^8.4",
+        "php": "^8.2 || ^8.3 || ^8.4 || ^8.5",
         "ext-json": "*",
         "ext-pdo": "*",
         "ext-pdo_pgsql": "*",
@@ -51,7 +51,7 @@
         }
     },
     "config": {
-        "optimize-autoloader": true,
+        "optimize-autoloader": false,
         "preferred-install": "dist",
         "sort-packages": true,
         "allow-plugins": {

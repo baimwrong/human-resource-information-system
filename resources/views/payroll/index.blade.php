@@ -100,6 +100,14 @@
                             </select>
                         </div>
                     </div>
+                    <div class="mt-3 pt-2 border-top">
+                        <div class="form-check form-switch">
+                            <input class="form-check-input" type="checkbox" name="run_in_background" id="payrollRunInBackground" value="1">
+                            <label class="form-check-label small" for="payrollRunInBackground">
+                                <strong>Queue Processing:</strong> Run in background worker (recommended for 100+ employees).
+                            </label>
+                        </div>
+                    </div>
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-sm btn-light border" data-bs-dismiss="modal">Cancel</button>

@@ -13,6 +13,7 @@ use App\Models\User;
 use App\Services\AuditLogger;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
+use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Hash;
 use Illuminate\Validation\Rule;
@@ -164,7 +165,13 @@ class EmployeeController extends Controller
     public function show(Employee $employee)
     {
         $user = Auth::user();
-        $canViewFinancials = $user->isHR() || ($user->employee && $user->employee->id === $employee->id);
+        $isSelf = $user->employee && $user->employee->id === $employee->id;
+
+        if (! $user->isManager() && ! $isSelf) {
+            abort(403, 'Unauthorized access to employee profile.');
+        }
+
+        $canViewFinancials = $user->isHR() || $isSelf;
 
         $relations = [
             'user',

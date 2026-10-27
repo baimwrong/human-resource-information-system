@@ -65,12 +65,25 @@ class PerformanceReviewController extends Controller
 
     public function show(PerformanceReview $performanceReview)
     {
+        $user = Auth::user();
+        $isSelf = $user->employee && $user->employee->id === $performanceReview->employee_id;
+        $isDirectManager = $user->employee && $user->employee->id === $performanceReview->employee->manager_id;
+        $isReviewer = $performanceReview->reviewer_id === $user->id;
+
+        if (! $user->isHR() && ! $isDirectManager && ! $isReviewer && ! $isSelf) {
+            abort(403, 'Unauthorized access to performance review.');
+        }
+
         $performanceReview->load(['employee.department', 'employee.designation', 'reviewer']);
         return view('performance.show', compact('performanceReview'));
     }
 
     public function destroy(PerformanceReview $performanceReview)
     {
+        if (! Auth::user()->isHR()) {
+            abort(403, 'Unauthorized. Only HR and Administrators can delete performance reviews.');
+        }
+
         $id = $performanceReview->id;
         $performanceReview->delete();
 

@@ -66,11 +66,11 @@ class LeaveTypeController extends Controller
     public function destroy(LeaveType $leaveType)
     {
         if ($leaveType->requests()->count() > 0) {
-            return back()->withErrors(['error' => 'Cannot delete leave type that has associated leave requests.']);
+            return back()->with('error', 'Cannot delete leave type that has associated leave requests.');
         }
 
-        if ($leaveType->balances()->where('used_days', '>', 0)->orWhere('pending_days', '>', 0)->count() > 0) {
-            return back()->withErrors(['error' => 'Cannot delete leave type that has active or utilized employee leave balances.']);
+        if ($leaveType->balances()->count() > 0) {
+            return back()->with('error', 'Cannot delete leave type that has active employee leave balances.');
         }
 
         $name = $leaveType->name;

@@ -7,12 +7,15 @@ use App\Models\Employee;
 use App\Models\LeaveBalance;
 use App\Models\LeaveRequest;
 use App\Models\LeaveType;
+use App\Notifications\LeaveRequestedNotification;
+use App\Notifications\LeaveStatusUpdatedNotification;
 use App\Services\AuditLogger;
 use Carbon\Carbon;
 use Carbon\CarbonPeriod;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
 use Illuminate\Support\Facades\DB;
+use Illuminate\Support\Facades\Log;
 use Illuminate\Support\Facades\Storage;
 
 class LeaveController extends Controller
@@ -125,38 +128,52 @@ class LeaveController extends Controller
 
         $currentYear = (int)$start->year;
 
-        // Check balance
-        $balance = LeaveBalance::where('employee_id', $employee->id)
-            ->where('leave_type_id', $validated['leave_type_id'])
-            ->where('year', $currentYear)
-            ->first();
-
-        if ($balance && $balance->remaining_days < $totalDays) {
-            return back()->withErrors(['leave_type_id' => "Insufficient leave balance. You have {$balance->remaining_days} days remaining, but requested {$totalDays} days."])->withInput();
-        }
-
         // Store private attachment on local disk for medical confidentiality
         $attachmentPath = null;
         if ($request->hasFile('attachment')) {
             $attachmentPath = $request->file('attachment')->store('leave_attachments', 'local');
         }
 
-        DB::transaction(function () use ($employee, $validated, $totalDays, $attachmentPath, $balance) {
-            LeaveRequest::create([
-                'employee_id' => $employee->id,
-                'leave_type_id' => $validated['leave_type_id'],
-                'start_date' => $validated['start_date'],
-                'end_date' => $validated['end_date'],
-                'total_days' => $totalDays,
-                'reason' => $validated['reason'],
-                'attachment_path' => $attachmentPath,
-                'status' => 'pending',
-            ]);
+        $createdLeaveRequest = null;
+        try {
+            DB::transaction(function () use ($employee, $validated, $totalDays, $attachmentPath, $currentYear, &$createdLeaveRequest) {
+                // Lock balance row for update to prevent race conditions on concurrent submissions
+                $balance = LeaveBalance::where('employee_id', $employee->id)
+                    ->where('leave_type_id', $validated['leave_type_id'])
+                    ->where('year', $currentYear)
+                    ->lockForUpdate()
+                    ->first();
 
-            if ($balance) {
-                $balance->increment('pending_days', $totalDays);
+                if ($balance && $balance->remaining_days < $totalDays) {
+                    throw new \RuntimeException("Insufficient leave balance. You have {$balance->remaining_days} days remaining, but requested {$totalDays} days.");
+                }
+
+                $createdLeaveRequest = LeaveRequest::create([
+                    'employee_id' => $employee->id,
+                    'leave_type_id' => $validated['leave_type_id'],
+                    'start_date' => $validated['start_date'],
+                    'end_date' => $validated['end_date'],
+                    'total_days' => $totalDays,
+                    'reason' => $validated['reason'],
+                    'attachment_path' => $attachmentPath,
+                    'status' => 'pending',
+                ]);
+
+                if ($balance) {
+                    $balance->increment('pending_days', $totalDays);
+                }
+            });
+        } catch (\RuntimeException $e) {
+            return back()->withErrors(['leave_type_id' => $e->getMessage()])->withInput();
+        }
+
+        if ($createdLeaveRequest && $employee->manager && $employee->manager->user) {
+            try {
+                $employee->manager->user->notify(new LeaveRequestedNotification($createdLeaveRequest));
+            } catch (\Throwable $e) {
+                Log::error('Failed sending leave requested notification: ' . $e->getMessage());
             }
-        });
+        }
 
         AuditLogger::log(
             action: 'submitted_leave_request',
@@ -230,6 +247,14 @@ class LeaveController extends Controller
             modelId: $leaveRequest->id
         );
 
+        if ($leaveRequest->employee && $leaveRequest->employee->user) {
+            try {
+                $leaveRequest->employee->user->notify(new LeaveStatusUpdatedNotification($leaveRequest));
+            } catch (\Throwable $e) {
+                Log::error('Failed sending leave status updated notification: ' . $e->getMessage());
+            }
+        }
+
         return back()->with('success', 'Leave request approved successfully.');
     }
 
@@ -279,6 +304,14 @@ class LeaveController extends Controller
             modelType: LeaveRequest::class,
             modelId: $leaveRequest->id
         );
+
+        if ($leaveRequest->employee && $leaveRequest->employee->user) {
+            try {
+                $leaveRequest->employee->user->notify(new LeaveStatusUpdatedNotification($leaveRequest));
+            } catch (\Throwable $e) {
+                Log::error('Failed sending leave status updated notification: ' . $e->getMessage());
+            }
+        }
 
         return back()->with('success', 'Leave request rejected.');
     }

@@ -129,15 +129,21 @@
                     </div>
 
                     <div class="mt-4 pt-2 border-top">
-                        <label class="form-label small fw-semibold">Transaction Safety Mode</label>
+                        <label class="form-label small fw-semibold">Execution &amp; Safety Mode</label>
+                        <div class="form-check form-switch mb-2">
+                            <input class="form-check-input" type="checkbox" name="run_in_background" id="runInBackground" value="1">
+                            <label class="form-check-label small" for="runInBackground">
+                                <strong>Background Queue:</strong> Process asynchronously via queue worker.
+                            </label>
+                        </div>
                         <div class="form-check form-switch">
                             <input class="form-check-input" type="checkbox" name="rollback_on_error" id="rollbackOnError" value="1">
                             <label class="form-check-label small" for="rollbackOnError">
                                 <strong>Strict Rollback:</strong> Fail &amp; rollback entire file if any row has an error.
                             </label>
                         </div>
-                        <div class="form-text fs-8 text-muted">
-                            If unchecked, valid rows will be committed and invalid rows will be reported in the error log.
+                        <div class="form-text fs-8 text-muted mt-2">
+                            Use background queue for large files (100+ rows) to avoid HTTP gateway timeouts.
                         </div>
                     </div>
                 </div>

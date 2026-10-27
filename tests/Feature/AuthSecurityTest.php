@@ -109,20 +109,25 @@ class AuthSecurityTest extends TestCase
         ]);
 
         $batch = PayrollBatch::create([
-            'batch_code' => 'BATCH-2026-01',
+            'batch_number' => 'PAY-2026-01',
             'month' => 1,
             'year' => 2026,
-            'status' => 'generated',
-            'processed_by' => $userHR->id,
+            'status' => 'processed',
+            'created_by' => $userHR->id,
         ]);
 
         $payslip = Payslip::create([
             'payroll_batch_id' => $batch->id,
             'employee_id' => $emp1->id,
-            'payslip_number' => 'PS-2026-001',
+            'slip_number' => 'PS-202601-0001',
+            'month' => 1,
+            'year' => 2026,
             'basic_salary' => 10000000,
+            'total_allowance' => 0,
+            'total_deduction' => 0,
             'net_salary' => 10000000,
-            'status' => 'generated',
+            'breakdown' => ['earnings' => [], 'deductions' => []],
+            'payment_status' => 'unpaid',
         ]);
 
         // Attacker (Employee 2) attempts to view Employee 1's payslip -> 403 Forbidden
@@ -153,6 +158,82 @@ class AuthSecurityTest extends TestCase
 
         $this->actingAs($managerUser)
             ->get(route('employees.create'))
+            ->assertStatus(403);
+    }
+
+    public function test_hr_and_admin_can_access_create_and_export_routes(): void
+    {
+        $adminUser = User::create([
+            'name' => 'Admin User 2',
+            'email' => 'admin2@example.com',
+            'password' => Hash::make('Password123!'),
+            'role' => 'admin',
+            'is_active' => true,
+        ]);
+
+        $this->actingAs($adminUser)
+            ->get(route('employees.create'))
+            ->assertStatus(200);
+
+        $this->actingAs($adminUser)
+            ->get(route('employees.export'))
+            ->assertStatus(200);
+    }
+
+    public function test_employee_can_view_own_360_profile_but_not_others(): void
+    {
+        $dept = Department::create(['code' => 'ACC', 'name' => 'Accounting', 'status' => 'active']);
+        $desig = Designation::create(['code' => 'ACC1', 'title' => 'Staff', 'department_id' => $dept->id]);
+        $shift = Shift::create(['name' => 'Regular Shift 2', 'start_time' => '09:00:00', 'end_time' => '18:00:00']);
+
+        $user1 = User::create([
+            'name' => 'Alice Worker',
+            'email' => 'alice@example.com',
+            'password' => Hash::make('Password123!'),
+            'role' => 'employee',
+            'is_active' => true,
+        ]);
+        $emp1 = Employee::create([
+            'user_id' => $user1->id,
+            'employee_code' => 'EMP-ALICE',
+            'first_name' => 'Alice',
+            'last_name' => 'Worker',
+            'department_id' => $dept->id,
+            'designation_id' => $desig->id,
+            'shift_id' => $shift->id,
+            'join_date' => '2024-01-01',
+            'employment_type' => 'permanent',
+            'employment_status' => 'active',
+        ]);
+
+        $user2 = User::create([
+            'name' => 'Bob Worker',
+            'email' => 'bob_worker@example.com',
+            'password' => Hash::make('Password123!'),
+            'role' => 'employee',
+            'is_active' => true,
+        ]);
+        $emp2 = Employee::create([
+            'user_id' => $user2->id,
+            'employee_code' => 'EMP-BOB',
+            'first_name' => 'Bob',
+            'last_name' => 'Worker',
+            'department_id' => $dept->id,
+            'designation_id' => $desig->id,
+            'shift_id' => $shift->id,
+            'join_date' => '2024-01-01',
+            'employment_type' => 'permanent',
+            'employment_status' => 'active',
+        ]);
+
+        // Alice views own profile -> 200 OK
+        $this->actingAs($user1)
+            ->get(route('employees.show', $emp1))
+            ->assertStatus(200);
+
+        // Alice tries to view Bob's profile -> 403 Forbidden
+        $this->actingAs($user1)
+            ->get(route('employees.show', $emp2))
             ->assertStatus(403);
     }
 }

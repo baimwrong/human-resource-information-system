@@ -5,6 +5,7 @@ namespace App\Models;
 use Illuminate\Database\Eloquent\Factories\HasFactory;
 use Illuminate\Database\Eloquent\Model;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
+use Carbon\Carbon;
 
 class Attendance extends Model
 {
@@ -28,13 +29,18 @@ class Attendance extends Model
     protected function casts(): array
     {
         return [
-            'date' => 'date',
+            'date' => 'date:Y-m-d',
             'clock_in' => 'datetime',
             'clock_out' => 'datetime',
             'work_hours' => 'decimal:2',
             'overtime_hours' => 'decimal:2',
             'is_adjusted' => 'boolean',
         ];
+    }
+
+    public function setDateAttribute($value): void
+    {
+        $this->attributes['date'] = $value ? Carbon::parse($value)->toDateString() : null;
     }
 
     public function employee(): BelongsTo

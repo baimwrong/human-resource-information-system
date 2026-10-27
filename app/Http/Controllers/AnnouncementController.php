@@ -54,6 +54,10 @@ class AnnouncementController extends Controller
 
     public function destroy(Announcement $announcement)
     {
+        if (! Auth::user()->isHR() && $announcement->created_by !== Auth::id()) {
+            abort(403, 'Unauthorized. You cannot delete announcements created by another user.');
+        }
+
         $id = $announcement->id;
         $announcement->delete();
 

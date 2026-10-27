@@ -2,6 +2,7 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\ProcessBulkImportJob;
 use App\Models\BulkImportLog;
 use App\Services\BulkImportService;
 use Illuminate\Http\Request;
@@ -45,6 +46,18 @@ class BulkImportController extends Controller
         $type = $request->input('import_type');
         $fileName = $file->getClientOriginalName();
         $rollback = $request->boolean('rollback_on_error');
+        $runInBackground = $request->boolean('run_in_background');
+
+        // Optional asynchronous queue dispatch for large files
+        if ($runInBackground) {
+            $storedPath = $file->store('temp_imports', 'local');
+            ProcessBulkImportJob::dispatch($type, $storedPath, $fileName, Auth::id(), $rollback);
+
+            return redirect()->route('bulk-import.index')->with(
+                'info',
+                "CSV file '{$fileName}' has been queued for background ingestion. Processing will continue asynchronously."
+            );
+        }
 
         $tempPath = $file->getRealPath();
 

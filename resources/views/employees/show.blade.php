@@ -35,9 +35,15 @@
                         <i class="bi bi-pencil me-1"></i> Edit Profile
                     </a>
                 @endif
-                <a href="{{ route('employees.index') }}" class="btn btn-outline-secondary btn-sm">
-                    <i class="bi bi-arrow-left me-1"></i> Directory
-                </a>
+                @if(Auth::user()->isManager())
+                    <a href="{{ route('employees.index') }}" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-arrow-left me-1"></i> Directory
+                    </a>
+                @else
+                    <a href="{{ route('dashboard') }}" class="btn btn-outline-secondary btn-sm">
+                        <i class="bi bi-arrow-left me-1"></i> Dashboard
+                    </a>
+                @endif
             </div>
         </div>
     </div>

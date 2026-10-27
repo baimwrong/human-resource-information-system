@@ -23,5 +23,5 @@ WORKDIR /var/www/html
 # Expose port
 EXPOSE 8000
 
-# Default command to serve Laravel application
-CMD ["sh", "-c", "composer install --no-interaction && php artisan migrate --seed --force && php artisan serve --host=0.0.0.0 --port=8000"]
+# Default command to serve Laravel application safely without re-seeding on restart
+CMD ["sh", "-c", "composer install --no-interaction && php artisan migrate --force && php artisan serve --host=0.0.0.0 --port=8000"]

@@ -2,15 +2,18 @@
 
 namespace App\Http\Controllers;
 
+use App\Jobs\GeneratePayrollBatchJob;
 use App\Models\Employee;
 use App\Models\PayrollBatch;
 use App\Models\Payslip;
 use App\Models\SalaryStructure;
+use App\Notifications\PayslipGeneratedNotification;
 use App\Services\AuditLogger;
 use App\Services\PayrollCalculationService;
 use Carbon\Carbon;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Auth;
+use Illuminate\Support\Facades\Log;
 
 class PayrollController extends Controller
 {
@@ -40,6 +43,19 @@ class PayrollController extends Controller
             'month' => ['required', 'integer', 'between:1,12'],
             'year' => ['required', 'integer', 'between:2020,2035'],
         ]);
+
+        if ($request->boolean('run_in_background')) {
+            GeneratePayrollBatchJob::dispatch(
+                $validated['month'],
+                $validated['year'],
+                Auth::id()
+            );
+
+            return redirect()->route('payroll.index')->with(
+                'info',
+                "Payroll run for {$validated['month']}/{$validated['year']} has been queued for background generation."
+            );
+        }
 
         $batch = $this->payrollService->generateMonthlyPayroll(
             $validated['month'],
@@ -91,6 +107,17 @@ class PayrollController extends Controller
             'paid_at' => now(),
             'payment_method' => $request->input('payment_method', 'bank_transfer'),
         ]);
+
+        // Send notifications to employees
+        foreach ($batch->payslips()->with('employee.user')->get() as $payslip) {
+            if ($payslip->employee && $payslip->employee->user) {
+                try {
+                    $payslip->employee->user->notify(new PayslipGeneratedNotification($payslip));
+                } catch (\Throwable $e) {
+                    Log::error('Failed sending payslip notification: ' . $e->getMessage());
+                }
+            }
+        }
 
         AuditLogger::log(
             action: 'marked_payroll_paid',

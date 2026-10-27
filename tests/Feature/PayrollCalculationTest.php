@@ -107,10 +107,10 @@ class PayrollCalculationTest extends TestCase
         $batch = $this->payrollService->generateMonthlyPayroll(
             month: 10,
             year: 2026,
-            processedBy: $this->hrUser->id
+            creatorId: $this->hrUser->id
         );
 
-        $this->assertEquals('generated', $batch->status);
+        $this->assertEquals('processed', $batch->status);
 
         $payslip = Payslip::where('payroll_batch_id', $batch->id)
             ->where('employee_id', $this->employee->id)
@@ -120,13 +120,17 @@ class PayrollCalculationTest extends TestCase
 
         // Daily rate = 10,000,000 / 20 work days = 500,000
         // Unpaid leave deduction = 500,000 * 2 = 1,000,000
-        $this->assertEquals(1000000.0, (float)$payslip->unpaid_leave_deduction);
+        $deductions = collect($payslip->breakdown['deductions'] ?? []);
+        $unpaidLeaveItem = $deductions->first(fn ($d) => str_contains($d['label'], 'Unpaid Leave'));
+        $this->assertNotNull($unpaidLeaveItem);
+        $this->assertEquals(1000000.0, (float)$unpaidLeaveItem['amount']);
 
-        // Gross = 10,000,000 (basic) + 1,000,000 (house) + 500,000 (transport) + 500,000 (meal) = 12,000,000
+        // Allowances = 1,000,000 (house) + 500,000 (transport) + 500,000 (meal) = 2,000,000
         // Deductions = 500,000 (tax) + 300,000 (insurance) + 1,000,000 (unpaid leave) = 1,800,000
-        // Net = 12,000,000 - 1,800,000 = 10,200,000
-        $this->assertEquals(12000000.0, (float)$payslip->gross_salary);
-        $this->assertEquals(1800000.0, (float)$payslip->total_deductions);
+        // Net = (10,000,000 + 2,000,000) - 1,800,000 = 10,200,000
+        $this->assertEquals(10000000.0, (float)$payslip->basic_salary);
+        $this->assertEquals(2000000.0, (float)$payslip->total_allowance);
+        $this->assertEquals(1800000.0, (float)$payslip->total_deduction);
         $this->assertEquals(10200000.0, (float)$payslip->net_salary);
     }
 
@@ -135,14 +139,76 @@ class PayrollCalculationTest extends TestCase
         $batch = $this->payrollService->generateMonthlyPayroll(
             month: 10,
             year: 2026,
-            processedBy: $this->hrUser->id
+            creatorId: $this->hrUser->id
         );
 
         $batch->update(['status' => 'paid']);
 
-        $this->expectException(\Exception::class);
-        $this->expectExceptionMessage("Cannot recalculate payroll batch with status 'paid'");
+        $this->expectException(\RuntimeException::class);
+        $this->expectExceptionMessage('already finalized and marked as PAID');
 
-        $this->payrollService->recalculateBatch($batch->id);
+        $this->payrollService->generateMonthlyPayroll(
+            month: 10,
+            year: 2026,
+            creatorId: $this->hrUser->id
+        );
+    }
+
+    public function test_payroll_proration_for_mid_month_hire(): void
+    {
+        $dept = Department::where('code', 'FIN')->first();
+        $desig = Designation::where('code', 'ACC')->first();
+        $shift = Shift::first();
+
+        $midHireUser = User::create([
+            'name' => 'Mid Month Hire',
+            'email' => 'midhire@example.com',
+            'password' => Hash::make('Password123!'),
+            'role' => 'employee',
+            'is_active' => true,
+        ]);
+
+        // Joins Oct 19, 2026 (10 working days remaining out of 22 in October)
+        $midEmployee = Employee::create([
+            'user_id' => $midHireUser->id,
+            'employee_code' => 'EMP-MID-001',
+            'first_name' => 'Mid',
+            'last_name' => 'Hire',
+            'department_id' => $dept->id,
+            'designation_id' => $desig->id,
+            'shift_id' => $shift->id,
+            'join_date' => '2026-10-19',
+            'employment_type' => 'permanent',
+            'employment_status' => 'active',
+        ]);
+
+        SalaryStructure::create([
+            'employee_id' => $midEmployee->id,
+            'basic_salary' => 22000000, // 22M / 22 days = 1M/day
+            'house_allowance' => 2200000, // 2.2M / 22 days = 100k/day
+            'transport_allowance' => 0,
+            'meal_allowance' => 0,
+            'tax_deduction' => 0,
+            'insurance_deduction' => 0,
+            'effective_date' => '2026-10-19',
+        ]);
+
+        $batch = $this->payrollService->generateMonthlyPayroll(
+            month: 10,
+            year: 2026,
+            creatorId: $this->hrUser->id
+        );
+
+        $payslip = Payslip::where('payroll_batch_id', $batch->id)
+            ->where('employee_id', $midEmployee->id)
+            ->first();
+
+        $this->assertNotNull($payslip);
+        // 10 active working days out of 22 -> 10/22 * 22,000,000 = 10,000,000
+        $this->assertEquals(10000000.0, (float)$payslip->basic_salary);
+        // 10/22 * 2,200,000 = 1,000,000
+        $this->assertEquals(1000000.0, (float)$payslip->total_allowance);
+        $this->assertEquals(11000000.0, (float)$payslip->net_salary);
+        $this->assertStringContainsString('Prorated', $payslip->breakdown['earnings'][0]['label']);
     }
 }

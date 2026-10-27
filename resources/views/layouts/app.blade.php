@@ -29,6 +29,11 @@
             </a>
 
             <div class="sidebar-heading">Self-Service</div>
+            @if(Auth::user()->employee)
+                <a class="nav-link {{ request()->routeIs('employees.show') && request()->route('employee') && (is_object(request()->route('employee')) ? request()->route('employee')->id : request()->route('employee')) == Auth::user()->employee->id ? 'active' : '' }}" href="{{ route('employees.show', Auth::user()->employee) }}">
+                    <i class="bi bi-person-badge"></i> My 360° Profile
+                </a>
+            @endif
             <a class="nav-link {{ request()->routeIs('attendance.my') ? 'active' : '' }}" href="{{ route('attendance.my') }}">
                 <i class="bi bi-clock-history"></i> My Attendance
             </a>
@@ -114,7 +119,10 @@
                     </button>
                     <ul class="dropdown-menu dropdown-menu-end shadow-sm border-0">
                         <li><h6 class="dropdown-header">{{ Auth::user()->email }}</h6></li>
-                        <li><a class="dropdown-item small" href="{{ route('profile') }}"><i class="bi bi-person me-2"></i>My Profile</a></li>
+                        @if(Auth::user()->employee)
+                            <li><a class="dropdown-item small" href="{{ route('employees.show', Auth::user()->employee) }}"><i class="bi bi-person-badge me-2"></i>My 360° Profile</a></li>
+                        @endif
+                        <li><a class="dropdown-item small" href="{{ route('profile') }}"><i class="bi bi-gear me-2"></i>Account Settings</a></li>
                         <li><hr class="dropdown-divider"></li>
                         <li>
                             <form action="{{ route('logout') }}" method="POST">

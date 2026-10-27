@@ -18,7 +18,7 @@ class AttendanceService
         $now = Carbon::now();
 
         $existing = Attendance::where('employee_id', $employee->id)
-            ->where('date', $today)
+            ->whereDate('date', $today)
             ->first();
 
         if ($existing && $existing->clock_in) {
@@ -63,9 +63,21 @@ class AttendanceService
         $today = Carbon::today()->toDateString();
         $now = Carbon::now();
 
+        // 1. Look for today's clock-in
         $attendance = Attendance::where('employee_id', $employee->id)
-            ->where('date', $today)
+            ->whereDate('date', $today)
+            ->whereNotNull('clock_in')
             ->first();
+
+        // 2. If not found, check if there is an unclosed clock-in from yesterday (for night shift crossing midnight)
+        if (! $attendance) {
+            $yesterday = Carbon::yesterday()->toDateString();
+            $attendance = Attendance::where('employee_id', $employee->id)
+                ->whereDate('date', $yesterday)
+                ->whereNotNull('clock_in')
+                ->whereNull('clock_out')
+                ->first();
+        }
 
         if (! $attendance || ! $attendance->clock_in) {
             throw new \RuntimeException('Cannot clock out: You have not clocked in for today yet.');
@@ -76,8 +88,11 @@ class AttendanceService
         }
 
         $clockIn = Carbon::parse($attendance->clock_in);
-        $totalMinutes = max(0, $now->diffInMinutes($clockIn));
-        $workHours = round($totalMinutes / 60, 2);
+        $totalMinutes = abs($now->diffInMinutes($clockIn));
+        $elapsedHours = round($totalMinutes / 60, 2);
+
+        // Deduct 1-hour unpaid meal break if elapsed time is 5 hours or more
+        $workHours = $elapsedHours >= 5.0 ? max(0, round($elapsedHours - 1.0, 2)) : $elapsedHours;
 
         // Standard 8 work hours, rest is overtime
         $overtimeHours = max(0, round($workHours - 8.0, 2));

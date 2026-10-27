@@ -1,0 +1,59 @@
+version: '3.8'
+
+services:
+  # Production Application Web & Worker Service
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile.prod
+    container_name: hris_prod_app
+    restart: always
+    ports:
+      - "80:80"
+    environment:
+      APP_NAME: "HRIS Enterprise"
+      APP_ENV: production
+      APP_DEBUG: "false"
+      APP_URL: "http://localhost"
+      DB_CONNECTION: pgsql
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_DATABASE: hris_db
+      DB_USERNAME: postgres
+      DB_PASSWORD: postgres_secret
+      QUEUE_CONNECTION: database
+      MAIL_MAILER: smtp
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - hris_network
+
+  # Production PostgreSQL 18 Database Service
+  postgres:
+    image: postgres:17-alpine
+    container_name: hris_prod_postgres
+    restart: always
+    environment:
+      POSTGRES_DB: hris_db
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres_secret
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata_prod:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d hris_db"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - hris_network
+
+volumes:
+  pgdata_prod:
+    driver: local
+
+networks:
+  hris_network:
+    driver: bridge

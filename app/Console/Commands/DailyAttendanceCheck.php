@@ -82,11 +82,16 @@ class DailyAttendanceCheck extends Command
                     $absentCount++;
                 }
             } elseif ($attendance->clock_in && ! $attendance->clock_out) {
-                // Clock-in without clock-out: flag missing clock-out
-                if (empty($attendance->notes)) {
-                    $attendance->update([
-                        'notes' => 'Missing clock-out record.',
-                    ]);
+                // Do not flag active night shifts that started recently and cross midnight
+                $isNightShift = $employee->shift && $employee->shift->is_night_shift;
+                $elapsedHours = abs(now()->diffInHours(Carbon::parse($attendance->clock_in)));
+
+                if (! $isNightShift && $elapsedHours >= 8) {
+                    if (empty($attendance->notes)) {
+                        $attendance->update([
+                            'notes' => 'Missing clock-out record.',
+                        ]);
+                    }
                 }
             }
         }
